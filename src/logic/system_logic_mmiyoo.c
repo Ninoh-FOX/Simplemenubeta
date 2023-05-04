@@ -13,6 +13,10 @@
 #include "../headers/utils.h"
 #include "../headers/cJSON.h"
 
+#define SYSFS_CPUFREQ_DIR "/sys/devices/system/cpu/cpu0/cpufreq"
+#define SYSFS_CPUFREQ_SET SYSFS_CPUFREQ_DIR "/scaling_max_freq"
+
+
 // Set Volume (Raw)
 #define MI_AO_SETVOLUME 0x4008690b
 #define MI_AO_GETVOLUME 0xc008690c
@@ -128,6 +132,18 @@ void to_string(char str[], int num) {
 
 void setCPU(uint32_t mhz) {
     currentCPU = mhz;
+	
+	char strMhz[10];
+	int fd = open(SYSFS_CPUFREQ_SET, O_RDWR);
+	to_string(strMhz, (mhz * 1000));
+	ssize_t ret = write(fd, strMhz, strlen(strMhz));
+	if (ret==-1) {
+		logMessage("ERROR", "setCPU", "Error writting to file");
+	}
+	close(fd);
+	char temp[300];
+	snprintf(temp,sizeof(temp),"CPU speed set: %d",currentCPU);
+	logMessage("INFO","setCPU",temp);
 }
 
 void turnScreenOnOrOff(int state) {

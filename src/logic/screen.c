@@ -762,16 +762,10 @@ void showRomPreferences() {
 	}
 #else
 #if defined MIYOOMINI
-	if (CURRENT_SECTION.currentGameNode->data->preferences.frequency==1200000 || CURRENT_SECTION.currentGameNode->data->preferences.frequency==1000000 || CURRENT_SECTION.currentGameNode->data->preferences.frequency==800000 || CURRENT_SECTION.currentGameNode->data->preferences.frequency==600000 || CURRENT_SECTION.currentGameNode->data->preferences.frequency==400000) {
+	if (CURRENT_SECTION.currentGameNode->data->preferences.frequency==CPU_NORMAL || CURRENT_SECTION.currentGameNode->data->preferences.frequency==CPU_HIGH) {
 		drawTextOnScreen(font, NULL, (SCREEN_WIDTH/2)-width/2+textWidth+1, (SCREEN_HEIGHT/2)-calculateProportionalSizeOrDistance1(9), "1200Mhz", valueColor, VAlignMiddle | HAlignLeft, (int[]){}, 0);
-	} else if (CURRENT_SECTION.currentGameNode->data->preferences.frequency==1000000) {
+	} else {
 		drawTextOnScreen(font, NULL, (SCREEN_WIDTH/2)-width/2+textWidth+1, (SCREEN_HEIGHT/2)-calculateProportionalSizeOrDistance1(9), "1000Mhz", valueColor, VAlignMiddle | HAlignLeft, (int[]){}, 0);
-	} else if (CURRENT_SECTION.currentGameNode->data->preferences.frequency==800000) {
-		drawTextOnScreen(font, NULL, (SCREEN_WIDTH/2)-width/2+textWidth+1, (SCREEN_HEIGHT/2)-calculateProportionalSizeOrDistance1(9), "800Mhz", valueColor, VAlignMiddle | HAlignLeft, (int[]){}, 0);
-	} else if (CURRENT_SECTION.currentGameNode->data->preferences.frequency==600000) {
-		drawTextOnScreen(font, NULL, (SCREEN_WIDTH/2)-width/2+textWidth+1, (SCREEN_HEIGHT/2)-calculateProportionalSizeOrDistance1(9), "600Mhz", valueColor, VAlignMiddle | HAlignLeft, (int[]){}, 0);
-	} else if (CURRENT_SECTION.currentGameNode->data->preferences.frequency==400000) {
-		drawTextOnScreen(font, NULL, (SCREEN_WIDTH/2)-width/2+textWidth+1, (SCREEN_HEIGHT/2)-calculateProportionalSizeOrDistance1(9), "400Mhz", valueColor, VAlignMiddle | HAlignLeft, (int[]){}, 0);
 	}
 #else
 	drawTextOnScreen(font, NULL, (SCREEN_WIDTH/2)-width/2+textWidth, (SCREEN_HEIGHT/2)-calculateProportionalSizeOrDistance1(9), "not available", valueColor, VAlignMiddle | HAlignLeft, (int[]){}, 0);
@@ -1119,20 +1113,28 @@ void drawGameList() {
 
 		char *temp = malloc(strlen(buf)+2);
 		if(currentSectionNumber!=favoritesSectionNumber) {
+			#if defined MIYOOMINI
+			strcpy(temp,buf);
+			#else
 			if (rom->preferences.frequency == OC_OC_HIGH||rom->preferences.frequency == OC_OC_LOW) {
 				strcpy(temp,"+");
 				strcat(temp,buf);
 			} else {
 				strcpy(temp,buf);
 			}
+			#endif
 		} else {
 			if (CURRENT_SECTION.gameCount>0) {
+				#if defined MIYOOMINI
+				strcpy(temp,buf);
+				#else
 				if (favorites[i].frequency == OC_OC_HIGH||favorites[i].frequency == OC_OC_LOW) {
 					strcpy(temp,"+");
 					strcat(temp,buf);
 				} else {
 					strcpy(temp,buf);
 				}
+				#endif
 			} else {
 				free(nameWithoutExtension);
 				free(buf);
@@ -1456,22 +1458,19 @@ void setupSystemSettings() {
 	fscanf(fp, "%d", &max_freq);
     fclose(fp);
 	if (max_freq==1200000) {
-		CPUMIYOOValue=max_freq;
+		CPUMIYOOValue=CPU_HIGH;
 		values[4]="1200Mhz";
-	} else if (max_freq==1100000){
-		CPUMIYOOValue=max_freq;
-		values[4]="1100Mhz";
 	} else if (max_freq==1000000){
-		CPUMIYOOValue=max_freq;
+		CPUMIYOOValue=CPU_NORMAL;
 		values[4]="1000Mhz";
 	} else if (max_freq==800000){
-		CPUMIYOOValue=max_freq;
+		CPUMIYOOValue=CPU_MEDIO;
 		values[4]="800Mhz";
 	} else if (max_freq==600000){
-		CPUMIYOOValue=max_freq;
+		CPUMIYOOValue=CPU_LOW;
 		values[4]="600Mhz";
 	} else if (max_freq==400000){
-		CPUMIYOOValue=max_freq;
+		CPUMIYOOValue=CPU_ULTRALOW;
 		values[4]="400Mhz";
 	}
 #else

@@ -142,6 +142,11 @@ extern int hdmiChanged;
 #if defined MIYOOMINI
 extern int CPUMIYOO;
 extern int CPUMIYOOValue;
+extern int CPU_HIGH;
+extern int CPU_NORMAL;
+extern int CPU_MEDIO;
+extern int CPU_LOW;
+extern int CPU_ULTRALOW;
 extern char cpuclock[200];
 extern int audioFix;
 extern int luminationValue;

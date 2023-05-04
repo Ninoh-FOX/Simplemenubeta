@@ -119,6 +119,11 @@ int hdmiChanged;
 #if defined MIYOOMINI
 int CPUMIYOO;
 int CPUMIYOOValue;
+int CPU_HIGH;
+int CPU_NORMAL;
+int CPU_MEDIO;
+int CPU_LOW;
+int CPU_ULTRALOW;
 char cpuclock[200];
 int audioFix;
 int luminationValue;

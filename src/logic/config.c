@@ -856,6 +856,21 @@ void loadConfig() {
 
 	value = ini_get(config, "CPU", "sleep_speed");
 	OC_SLEEP=atoifgl(value);
+	
+	value = ini_get(config, "CPU", "cpu_high_speed");
+	CPU_HIGH=atoifgl(value);
+
+	value = ini_get(config, "CPU", "cpu_normal_speed");
+	CPU_NORMAL=atoifgl(value);
+
+	value = ini_get(config, "CPU", "cpu_medio_speed");
+	CPU_MEDIO=atoifgl(value);
+
+	value = ini_get(config, "CPU", "cpu_low_speed");
+	CPU_LOW=atoifgl(value);
+	
+	value = ini_get(config, "CPU", "cpu_ultralow_speed");
+	CPU_ULTRALOW=atoifgl(value);
 
 	value = ini_get(config, "SCREEN", "hdmi_width");
 	HDMI_WIDTH=atoifgl(value);

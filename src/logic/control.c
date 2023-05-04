@@ -956,7 +956,6 @@ void performSystemSettingsChoosingAction() {
 					char cpuclock[200];
 					snprintf(cpuclock, sizeof(cpuclock), "echo %d > /sys/devices/system/cpu/cpu0/cpufreq/scaling_max_freq", CPUMIYOO);
 					system(cpuclock);
-					CPUMIYOOValue=CPUMIYOO;
 				}
 			} else {
 				if (CPUMIYOO<1200000) {
@@ -964,7 +963,6 @@ void performSystemSettingsChoosingAction() {
 					char cpuclock[200];
 					snprintf(cpuclock, sizeof(cpuclock), "echo %d > /sys/devices/system/cpu/cpu0/cpufreq/scaling_max_freq", CPUMIYOO);
 					system(cpuclock);
-					CPUMIYOOValue=CPUMIYOO;
 				}
 			}
 #else
