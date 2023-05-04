@@ -82,7 +82,7 @@ void initialSetup(int w, int h) {
 	createConfigFilesInHomeIfTheyDontExist();
 	loadConfig();
 	#if defined MIYOOMINI
-	CPUMIYOOValue = 1200000;
+	CPUMIYOOValue = CPU_HIGH;
 	#else
 	OCValue = OC_OC_LOW;
 	#endif
@@ -100,7 +100,7 @@ void initialSetup(int w, int h) {
 //	screen = SDL_SetVideoMode(SCREEN_WIDTH, SCREEN_HEIGHT, 16, SDL_NOFRAME|SDL_SWSURFACE);
 	HW_Init();
 	currentCPU = OC_NO;
-#ifndef TARGET_OD_BETA
+#ifndef TARGET_OD_BETA || ifndef MIYOOMINI
 	logMessage("INFO","initialSetup","Setting CPU to base");
 	setCPU(currentCPU);
 #endif
