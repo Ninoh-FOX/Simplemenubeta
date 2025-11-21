@@ -25,6 +25,10 @@ void clearShutdownTimer();
 void resetShutdownTimer();
 void startBatteryTimer();
 void clearBatteryTimer();
+void startWifiTimer();
+void clearWifiTimer();
+void startActiveRefreshTimer();
+void clearActiveRefreshTimer();
 void drawLoadingText();
 void drawCopyingText();
 void resizeSectionBackground(struct MenuSection *section);
@@ -33,5 +37,9 @@ void freeResources();
 void freeFonts();
 void freeSettingsFonts();
 void initializeSettingsFonts();
+void openSearchWindow();
+void closeSearchWindow();
+void searchInvalidateIndex();
+void handleSearchInput(int key);
 
 #endif

@@ -530,14 +530,30 @@ void initializeDisplay(int w, int h) {
 	logMessage("INFO", "initializeDisplay", msg);
 	SCREEN_RATIO = (double)SCREEN_WIDTH/SCREEN_HEIGHT;
 	screen = SDL_SetVideoMode(SCREEN_WIDTH, SCREEN_HEIGHT, depth, pcflags);
-	char tempString[1000];
-	snprintf(tempString, sizeof(tempString), "%s/.simplemenu/resources/loading.png", getenv("HOME"));
-	SDL_Surface* image;
-	image = IMG_Load(tempString);
-	SDL_BlitSurface(image, NULL, screen, NULL);
+	#if defined MIYOOMINI
+	if (loadingScreenEnabled) {
+    char tempString[1000];
+    snprintf(tempString, sizeof(tempString), "%s/.simplemenu/resources/loading.png", getenv("HOME"));
+    SDL_Surface* image;
+    image = IMG_Load(tempString);
+    SDL_BlitSurface(image, NULL, screen, NULL);
+    SDL_Flip(screen);
+    SDL_FreeSurface(image);
+    image = NULL;
+	SDL_Delay(1000);
+	} else {
 	SDL_Flip(screen);
-	SDL_FreeSurface(image);
-	image = NULL;
+	}
+	#else
+	char tempString[1000];
+    snprintf(tempString, sizeof(tempString), "%s/.simplemenu/resources/loading.png", getenv("HOME"));
+    SDL_Surface* image;
+    image = IMG_Load(tempString);
+    SDL_BlitSurface(image, NULL, screen, NULL);
+    SDL_Flip(screen);
+    SDL_FreeSurface(image);
+    image = NULL;
+	#endif
 #else
 	char res[20];
 	sprintf(res, "resolution: %dx%d", w, h);
@@ -556,7 +572,7 @@ void initializeDisplay(int w, int h) {
 		fclose(fp1);
 	}
 
-#if defined TARGET_OD || defined TARGET_OD_BETA || defined MIYOOMINI
+#if defined TARGET_OD || defined TARGET_OD_BETA
 	if(modes==(SDL_Rect **)0) {
 		logMessage("INFO", "initializeDisplay", "No available modes");
 	} else if(modes==(SDL_Rect **)-1) {
@@ -585,8 +601,8 @@ void initializeDisplay(int w, int h) {
 	SCREEN_RATIO = (double)SCREEN_WIDTH/SCREEN_HEIGHT;
 }
 
-void getTextWidth(TTF_Font *font, char *text, int *widthToBeSet){
-	TTF_SizeUTF8(font, (const char *) text, widthToBeSet, NULL);
+void getTextWidth(TTF_Font *font, const char *text, int *widthToBeSet){
+        TTF_SizeUTF8(font, text, widthToBeSet, NULL);
 }
 
 void refreshScreen() {

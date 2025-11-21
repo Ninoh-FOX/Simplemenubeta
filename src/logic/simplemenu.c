@@ -21,7 +21,7 @@
 
 
 void initializeGlobals() {
-	running=1;
+        running=1;
 	currentSectionNumber=0;
 	gamesInPage=0;
 	CURRENT_SECTION.totalPages=0;
@@ -37,6 +37,15 @@ void initializeGlobals() {
 	menuVisibleInFullscreenMode=1;
 	stripGames=1;
 	srand(time(0));
+	#if defined MIYOOMINI
+	brightness = getCurrentBrightness();
+	loadConfiguration1();
+	loadConfiguration2();
+	loadConfiguration3();
+	if (!mmModel) {
+		loadConfiguration4();
+    }
+    #endif
 }
 
 void resetFrameBuffer () {
@@ -54,6 +63,9 @@ void critical_error_handler()
 	char command[100];
 	snprintf(command, sizeof(command), "rm %s/.simplemenu/last_state.sav && sync", getenv("HOME"));
 	system(command);
+	if (musicEnabled) {
+		stopmusic();
+	}
 	freeResources();
 	exit(0);
 }
@@ -82,11 +94,10 @@ void initialSetup(int w, int h) {
 	createConfigFilesInHomeIfTheyDontExist();
 	loadConfig();
 	#if defined MIYOOMINI
-	CPUMIYOOValue = CPU_HIGH;
 	#else
 	OCValue = OC_OC_LOW;
-	#endif
 	sharpnessValue=8;
+    #endif
 	initializeDisplay(w,h);
 	freeFonts();
 	initializeFonts();
@@ -94,13 +105,19 @@ void initialSetup(int w, int h) {
 	createThemesInHomeIfTheyDontExist();
 	checkThemes();
 	loadLastState();
+    #if defined MIYOOMINI
+    #else
 	char temp[100];
 	sprintf(temp,"SDL_VIDEO_KMSDRM_SCALING_SHARPNESS=%i",sharpnessValue);
 	SDL_putenv(temp);
+    #endif
 //	screen = SDL_SetVideoMode(SCREEN_WIDTH, SCREEN_HEIGHT, 16, SDL_NOFRAME|SDL_SWSURFACE);
 	HW_Init();
+	#if defined MIYOOMINI
+    #else
 	currentCPU = OC_NO;
-#ifndef TARGET_OD_BETA || ifndef MIYOOMINI
+	#endif
+#ifndef TARGET_OD_BETA
 	logMessage("INFO","initialSetup","Setting CPU to base");
 	setCPU(currentCPU);
 #endif
@@ -128,13 +145,14 @@ void initialSetup2() {
 	} else {
 		ITEMS_PER_PAGE=FULLSCREEN_ITEMS_PER_PAGE;
 	}
-	#if defined(TARGET_BITTBOY) || defined(TARGET_RFW) || defined(TARGET_OD) || defined(TARGET_OD_BETA) || defined(TARGET_NPG)
+	#if defined(TARGET_BITTBOY) || defined(TARGET_RFW) || defined(TARGET_OD) || defined(TARGET_OD_BETA) || defined(TARGET_NPG) || defined(MIYOOMINI)
 	initSuspendTimer();
 	#endif
 	determineStartingScreen(sectionCount);
 	enableKeyRepeat();
 	#if defined MIYOOMINI
 	mmModel = access("/customer/app/axp_test", F_OK);
+	lastWifiMode=getCurrentWifi();
 	#endif
 	lastChargeLevel=getBatteryLevel();
 	beforeTryingToSwitchGroup = activeGroup;
@@ -145,24 +163,62 @@ void initialSetup2() {
 	hueValue = getCurrentSystemValue("hue");
 	saturationValue = getCurrentSystemValue("saturation");
 	contrastValue = getCurrentSystemValue("contrast");
+	gammaValue = loadConfiguration3();
 	#endif
-	brightnessValue = getCurrentBrightness();
-	maxBrightnessValue = getMaxBrightness();
+        brightnessValue = getCurrentBrightness();
+        maxBrightnessValue = getMaxBrightness();
+}
+
+int isSettingsState(int state) {
+        switch (state) {
+                case SETTINGS_SCREEN:
+                case APPEARANCE_SETTINGS:
+                case SYSTEM_SETTINGS:
+                case HELP_SCREEN_1:
+                case HELP_SCREEN_2:
+#if defined MIYOOMINI
+                case SCREEN_SETTINGS:
+#endif
+                        return 1;
+                default:
+                        return 0;
+        }
+}
+
+static int canToggleSearchWindow() {
+        return !isSettingsState(currentState) && currentState != SHUTTING_DOWN && currentState != AFTER_RUNNING_LAUNCH_AT_BOOT && currentState != LOADING;
 }
 
 void processEvents() {
-	SDL_Event event;
-	while (SDL_PollEvent(&event)) {
-		if(event.type==getKeyDown()){
-			if (!isSuspended) {
-				switch (currentState) {
-					case BROWSING_GAME_LIST:
-						previousState=BROWSING_GAME_LIST;
+        SDL_Event event;
+        while (SDL_PollEvent(&event)) {
+                if(event.type==getKeyDown()){
+                        if (!isSuspended) {
+                                SDLKey keyPressed = event.key.keysym.sym;
+				if (canToggleSearchWindow() && keyPressed==(SDLKey)BTN_L1) {
+					if (currentState==SEARCHING_ROMS) {
+						closeSearchWindow();
+					} else {
+						openSearchWindow();
+					}
+					resetScreenOffTimer();
+					continue;
+				}
+                                if (currentState==SEARCHING_ROMS) {
+                                        handleSearchInput(keyPressed);
+                                        resetScreenOffTimer();
+                                        continue;
+                                }
+                                switch (currentState) {
+                                        case BROWSING_GAME_LIST:
+                                                previousState=BROWSING_GAME_LIST;
 						performAction(CURRENT_SECTION.currentGameNode);
+						refreshName=0;
 						break;
 					case SELECTING_SECTION:
 						previousState=SELECTING_SECTION;
 						performAction(CURRENT_SECTION.currentGameNode);
+						refreshName=0;
 						break;
 					case SELECTING_EMULATOR:
 						performChoosingAction();
@@ -307,16 +363,24 @@ void processEvents() {
 	const int GAME_FPS=60;
 	const int FRAME_DURATION_IN_MILLISECONDS = 1000/GAME_FPS;
 	Uint32 start_time;
-	updateScreen(CURRENT_SECTION.currentGameNode);
-	refreshScreen();
-	startBatteryTimer();
-	while(running) {
-		start_time=SDL_GetTicks();
-		processEvents();
+updateScreen(CURRENT_SECTION.currentGameNode);
+refreshScreen();
+startBatteryTimer();
+startWifiTimer();
+while(running) {
+                start_time=SDL_GetTicks();
+                processEvents();
 		if(refreshRequest) {
 			updateScreen(CURRENT_SECTION.currentGameNode);
 			refreshRequest=0;
 			refreshScreen();
+		}
+		if(refreshName) {	// titles too long need refresh to scroll
+			refreshCounter++;
+			if(refreshCounter>10) {
+				refreshRequest=1;
+				refreshCounter=0;
+			}
 		}
 		//Time spent on one loop
 		int timeSpent = SDL_GetTicks()-start_time;

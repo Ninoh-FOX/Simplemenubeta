@@ -471,13 +471,57 @@ void loadTheme(char *theme) {
 			setThemeResourceValueInSection (themeConfig, "GENERAL", "batt_3", batt3);
 			setThemeResourceValueInSection (themeConfig, "GENERAL", "batt_4", batt4);
 			setThemeResourceValueInSection (themeConfig, "GENERAL", "batt_5", batt5);
+			setThemeResourceValueInSection (themeConfig, "GENERAL", "batt_6", batt6);
+			setThemeResourceValueInSection (themeConfig, "GENERAL", "batt_7", batt7);
+			setThemeResourceValueInSection (themeConfig, "GENERAL", "batt_8", batt8);
+			setThemeResourceValueInSection (themeConfig, "GENERAL", "batt_9", batt9);
+			setThemeResourceValueInSection (themeConfig, "GENERAL", "batt_10", batt10);
+			setThemeResourceValueInSection (themeConfig, "GENERAL", "batt_11", batt11);
+			setThemeResourceValueInSection (themeConfig, "GENERAL", "batt_12", batt12);
+			setThemeResourceValueInSection (themeConfig, "GENERAL", "batt_13", batt13);
+			setThemeResourceValueInSection (themeConfig, "GENERAL", "batt_14", batt14);
+			setThemeResourceValueInSection (themeConfig, "GENERAL", "batt_15", batt15);
+			setThemeResourceValueInSection (themeConfig, "GENERAL", "batt_16", batt16);
+			setThemeResourceValueInSection (themeConfig, "GENERAL", "batt_17", batt17);
+			setThemeResourceValueInSection (themeConfig, "GENERAL", "batt_18", batt18);
+			setThemeResourceValueInSection (themeConfig, "GENERAL", "batt_19", batt19);
+			setThemeResourceValueInSection (themeConfig, "GENERAL", "batt_20", batt20);
 			setThemeResourceValueInSection (themeConfig, "GENERAL", "batt_charging", battCharging);
 			surfaceBatt1 = IMG_Load(batt1);
 			surfaceBatt2 = IMG_Load(batt2);
 			surfaceBatt3 = IMG_Load(batt3);
 			surfaceBatt4 = IMG_Load(batt4);
 			surfaceBatt5 = IMG_Load(batt5);
+			surfaceBatt6 = IMG_Load(batt6);
+			surfaceBatt7 = IMG_Load(batt7);
+			surfaceBatt8 = IMG_Load(batt8);
+			surfaceBatt9 = IMG_Load(batt9);
+			surfaceBatt10 = IMG_Load(batt10);
+			surfaceBatt11 = IMG_Load(batt11);
+			surfaceBatt12 = IMG_Load(batt12);
+			surfaceBatt13 = IMG_Load(batt13);
+			surfaceBatt14 = IMG_Load(batt14);
+			surfaceBatt15 = IMG_Load(batt15);
+			surfaceBatt16 = IMG_Load(batt16);
+			surfaceBatt17 = IMG_Load(batt17);
+			surfaceBatt18 = IMG_Load(batt18);
+			surfaceBatt19 = IMG_Load(batt19);
+			surfaceBatt20 = IMG_Load(batt20);
 			surfaceBattCharging = IMG_Load(battCharging);
+		}
+		
+		wifiX = -1;
+		value = ini_get(themeConfig, "GENERAL", "wifi_x");
+		if(value!=NULL) {
+			wifiX = atoifgl(value);
+			value = ini_get(themeConfig, "GENERAL", "wifi_y");
+			wifiY = atoifgl(value);
+			setThemeResourceValueInSection (themeConfig, "GENERAL", "wifioff", wifioff);
+			setThemeResourceValueInSection (themeConfig, "GENERAL", "wifion", wifion);
+			setThemeResourceValueInSection (themeConfig, "GENERAL", "nowifi", nowifi);
+			surfaceWifiOff = IMG_Load(wifioff);
+			surfaceWifiOn = IMG_Load(wifion);
+			surfaceNoWifi = IMG_Load(nowifi);
 		}
 
 		setThemeResourceValueInSection (themeConfig, "GENERAL", "game_count_font", gameCountFont);
@@ -669,7 +713,10 @@ void saveRomPreferences(struct Rom *rom) {
 	fp = fopen(pathToPreferencesFilePlusFileName, "w");
 	fprintf(fp,"%d;", rom->preferences.emulatorDir);
 	fprintf(fp,"%d;", rom->preferences.emulator);
+	#if defined MIYOOMINI
+	#else
 	fprintf(fp,"%d", rom->preferences.frequency);
+	#endif
 	fclose(fp);
 }
 
@@ -691,7 +738,10 @@ void loadRomPreferences(struct Rom *rom) {
 
 	rom->preferences.emulatorDir=0;
 	rom->preferences.emulator=0;
+	#if defined MIYOOMINI
+	#else
 	rom->preferences.frequency=OC_NO;
+	#endif
 
 	fp = fopen(pathToPreferencesFilePlusFileName, "r");
 
@@ -713,7 +763,10 @@ void loadRomPreferences(struct Rom *rom) {
 	}
 	rom->preferences.emulatorDir=atoifgl(configurations[0]);
 	rom->preferences.emulator=atoifgl(configurations[1]);
+	#if defined MIYOOMINI
+	#else
 	rom->preferences.frequency = atoifgl(configurations[2]);
+	#endif
     fclose(fp);
 }
 
@@ -748,7 +801,10 @@ void saveFavorites() {
 			fprintf(fp,"%s;",favorite.executable);
 			fprintf(fp,"%d;",favorite.isConsoleApp);
 			fprintf(fp,"%s;",favorite.filesDirectory);
+			#if defined MIYOOMINI
+			#else
 			fprintf(fp,"%d",favorite.frequency);
+			#endif
 			linesWritten++;
 		}
 		fclose(fp);
@@ -787,7 +843,10 @@ void loadFavorites() {
 		strcpy(favorites[favoritesSize].executable,configurations[5]);
 		favorites[favoritesSize].isConsoleApp = atoi(configurations[6]);
 		strcpy(favorites[favoritesSize].filesDirectory,configurations[7]);
+		#if defined MIYOOMINI
+		#else
 		favorites[favoritesSize].frequency = atoi(configurations[8]);
+		#endif
 		int len = strlen(favorites[favoritesSize].filesDirectory);
 		if (favorites[favoritesSize].filesDirectory[len-1]=='\n') {
 			favorites[favoritesSize].filesDirectory[len-1]='\0';
@@ -856,21 +915,6 @@ void loadConfig() {
 
 	value = ini_get(config, "CPU", "sleep_speed");
 	OC_SLEEP=atoifgl(value);
-	
-	value = ini_get(config, "CPU", "cpu_high_speed");
-	CPU_HIGH=atoifgl(value);
-
-	value = ini_get(config, "CPU", "cpu_normal_speed");
-	CPU_NORMAL=atoifgl(value);
-
-	value = ini_get(config, "CPU", "cpu_medio_speed");
-	CPU_MEDIO=atoifgl(value);
-
-	value = ini_get(config, "CPU", "cpu_low_speed");
-	CPU_LOW=atoifgl(value);
-	
-	value = ini_get(config, "CPU", "cpu_ultralow_speed");
-	CPU_ULTRALOW=atoifgl(value);
 
 	value = ini_get(config, "SCREEN", "hdmi_width");
 	HDMI_WIDTH=atoifgl(value);
@@ -943,15 +987,22 @@ void loadConfig() {
 		BTN_START = atoifgl(value);
 	}
 
-	value = ini_get(config, "CONTROLS", "SELECT");
-	if (value) {
-		BTN_SELECT = atoifgl(value);
-	}
+        value = ini_get(config, "CONTROLS", "SELECT");
+        if (value) {
+                BTN_SELECT = atoifgl(value);
+        }
 
-	value = ini_get(config, "CONTROLS", "R");
-	if (value) {
-		BTN_R = atoifgl(value);
-	}
+        value = ini_get(config, "CONTROLS", "R");
+        if (value) {
+                BTN_R = atoifgl(value);
+        }
+
+        value = ini_get(config, "CONTROLS", "MENU");
+        if (value) {
+                BTN_MENU = atoifgl(value);
+        } else {
+                BTN_MENU = BTN_SELECT;
+        }
 
 	ini_free(config);
 	logMessage("INFO","loadConfig","Config loaded");
@@ -1263,13 +1314,57 @@ int loadSections(char *file) {
 		setThemeResourceValueInSection (themeConfig, "GENERAL", "batt_3", batt3);
 		setThemeResourceValueInSection (themeConfig, "GENERAL", "batt_4", batt4);
 		setThemeResourceValueInSection (themeConfig, "GENERAL", "batt_5", batt5);
+		setThemeResourceValueInSection (themeConfig, "GENERAL", "batt_6", batt6);
+		setThemeResourceValueInSection (themeConfig, "GENERAL", "batt_7", batt7);
+		setThemeResourceValueInSection (themeConfig, "GENERAL", "batt_8", batt8);
+		setThemeResourceValueInSection (themeConfig, "GENERAL", "batt_9", batt9);
+		setThemeResourceValueInSection (themeConfig, "GENERAL", "batt_10", batt10);
+		setThemeResourceValueInSection (themeConfig, "GENERAL", "batt_11", batt11);
+		setThemeResourceValueInSection (themeConfig, "GENERAL", "batt_12", batt12);
+		setThemeResourceValueInSection (themeConfig, "GENERAL", "batt_13", batt13);
+		setThemeResourceValueInSection (themeConfig, "GENERAL", "batt_14", batt14);
+		setThemeResourceValueInSection (themeConfig, "GENERAL", "batt_15", batt15);
+		setThemeResourceValueInSection (themeConfig, "GENERAL", "batt_16", batt16);
+		setThemeResourceValueInSection (themeConfig, "GENERAL", "batt_17", batt17);
+		setThemeResourceValueInSection (themeConfig, "GENERAL", "batt_18", batt18);
+		setThemeResourceValueInSection (themeConfig, "GENERAL", "batt_19", batt19);
+		setThemeResourceValueInSection (themeConfig, "GENERAL", "batt_20", batt20);
 		setThemeResourceValueInSection (themeConfig, "GENERAL", "batt_charging", battCharging);
 		surfaceBatt1 = IMG_Load(batt1);
 		surfaceBatt2 = IMG_Load(batt2);
 		surfaceBatt3 = IMG_Load(batt3);
 		surfaceBatt4 = IMG_Load(batt4);
 		surfaceBatt5 = IMG_Load(batt5);
+		surfaceBatt6 = IMG_Load(batt6);
+		surfaceBatt7 = IMG_Load(batt7);
+		surfaceBatt8 = IMG_Load(batt8);
+		surfaceBatt9 = IMG_Load(batt9);
+		surfaceBatt10 = IMG_Load(batt10);
+		surfaceBatt11 = IMG_Load(batt11);
+		surfaceBatt12 = IMG_Load(batt12);
+		surfaceBatt13 = IMG_Load(batt13);
+		surfaceBatt14 = IMG_Load(batt14);
+		surfaceBatt15 = IMG_Load(batt15);
+		surfaceBatt16 = IMG_Load(batt16);
+		surfaceBatt17 = IMG_Load(batt17);
+		surfaceBatt18 = IMG_Load(batt18);
+		surfaceBatt19 = IMG_Load(batt19);
+		surfaceBatt20 = IMG_Load(batt20);
 		surfaceBattCharging = IMG_Load(battCharging);
+	}
+	
+	wifiX = -1;
+	value = ini_get(themeConfig, "GENERAL", "wifi_x");
+	if(value!=NULL) {
+		wifiX = atoifgl(value);
+		value = ini_get(themeConfig, "GENERAL", "wifi_y");
+		wifiY = atoifgl(value);
+		setThemeResourceValueInSection (themeConfig, "GENERAL", "wifioff", wifioff);
+		setThemeResourceValueInSection (themeConfig, "GENERAL", "wifion", wifion);
+		setThemeResourceValueInSection (themeConfig, "GENERAL", "nowifi", nowifi);
+		surfaceWifiOff = IMG_Load(wifioff);
+		surfaceWifiOn = IMG_Load(wifion);
+		surfaceNoWifi = IMG_Load(nowifi);
 	}
 
 	value = ini_get(themeConfig, "GENERAL", "display_game_count");
@@ -1438,9 +1533,11 @@ void saveLastState() {
 	fprintf(fp, "%d;\n", activeGroup);
 	fprintf(fp, "%d;\n", currentSectionNumber);
 	fprintf(fp, "%d;\n", currentMode);
+	#if defined MIYOOMINI
+    #else
 	fprintf(fp, "%d;\n", OCValue);
-	fprintf(fp, "%d;\n", CPUMIYOOValue);
 	fprintf(fp, "%d;\n", sharpnessValue);
+	#endif
 	for(int groupCount=0;groupCount<sectionGroupCounter;groupCount++) {
 		int sectionsNum=countSections(sectionGroups[groupCount].groupPath);
 		for (int sectionCount=0;sectionCount<=sectionsNum;sectionCount++) {
@@ -1484,9 +1581,11 @@ void loadLastState() {
 	int groupCounter=-1;
 	int savedVersion=-1;
 	int itemsRead=-1;
+	#if defined MIYOOMINI
+    #else
 	int OCValueRead=-1;
-	int CPUMIYOOValueRead=-1;
 	int sharpnessValueRead=-1;
+    #endif
 	while ((read = getline(&line, &len, fp)) != -1) {
 		ptr = strtok(line, ";");
 		int i=0;
@@ -1523,12 +1622,13 @@ void loadLastState() {
 			startInSection=atoifgl(configurations[0]);
 		} else if (itemsRead==-1) {
 			itemsRead=atoifgl(configurations[0]);
+		#if defined MIYOOMINI
+        #else
 		} else if (OCValueRead==-1) {
 			OCValueRead=atoifgl(configurations[0]);
-		} else if (CPUMIYOOValueRead==-1) {
-			CPUMIYOOValueRead=atoifgl(configurations[0]);
 		} else if (sharpnessValueRead==-1) {
 			sharpnessValueRead=atoifgl(configurations[0]);
+		#endif
 		} else {
 			if(atoifgl(configurations[1])==0) {
 				groupCounter++;
@@ -1562,9 +1662,11 @@ void loadLastState() {
 	currentSectionNumber=startInSection;
 	activeGroup = startInGroup;
 	currentMode=itemsRead;
+	#if defined MIYOOMINI
+    #else
 	OCValue=OCValueRead;
-	CPUMIYOOValue=CPUMIYOOValueRead;
 	sharpnessValue=sharpnessValueRead;
+	#endif
 	fclose(fp);
 	if (line) {
 		free(line);

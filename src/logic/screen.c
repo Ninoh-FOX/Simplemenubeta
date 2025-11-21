@@ -1,14 +1,23 @@
+#define _GNU_SOURCE
+
 #include <ctype.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <strings.h>
 #include <time.h>
 #include <ctype.h>
+#include <unistd.h>
+#include <stdint.h>
+#include <limits.h>
+#include <sys/stat.h>
 
 #include "../headers/constants.h"
 #include "../headers/definitions.h"
 #include "../headers/globals.h"
 #include "../headers/graphics.h"
+#include "../headers/control.h"
+#include "../headers/screen.h"
 #include "../headers/input.h"
 #include "../headers/logic.h"
 #include "../headers/string_utils.h"
@@ -16,8 +25,12 @@
 #include "../headers/utils.h"
 #include "../headers/system_logic.h"
 
+// SDL
+extern SDL_Surface* IMG_Load(const char *file);
+
 TTF_Font *font = NULL;
 TTF_Font *miniFont = NULL;
+TTF_Font *searchFont = NULL;
 TTF_Font *picModeFont = NULL;
 TTF_Font *BIGFont = NULL;
 TTF_Font *headerFont = NULL;
@@ -44,6 +57,53 @@ char *values[10];
 char *hints[10];
 
 int countDown;
+int refreshName=0;
+int refreshCounter=0;
+typedef struct {
+int sectionIndex;
+int romIndex;
+const char *displayName;
+} SearchResult;
+
+static int ensureSectionInitialized(int sectionIndex);
+
+typedef struct {
+int sectionIndex;
+int romIndex;
+char *displayName;
+} SearchIndexEntry;
+
+typedef struct {
+int sectionIndex;
+int gameCount;
+} SearchIndexSectionMeta;
+
+static int searchKeyboardRow=0;
+static int searchKeyboardCol=0;
+static int searchSelectionIndex=0;
+static int searchFocusOnResults=0;
+static int searchPreviousState=BROWSING_GAME_LIST;
+static int searchResultsCount=0;
+static int searchTotalMatches=0;
+static SearchResult searchResults[1024];
+static char searchQuery[128];
+static SearchIndexEntry *searchIndexEntries=NULL;
+static int searchIndexCount=0;
+static int searchIndexCapacity=0;
+static SearchIndexSectionMeta searchIndexMeta[100];
+static int searchIndexMetaCount=0;
+static int searchIndexReady=0;
+static char searchIndexPath[PATH_MAX];
+static int searchSectionGameCountCache[100];
+static int searchSectionCountCacheSize=0;
+static void drawBoxWithBorder(int x, int y, int width, int height, int *fillColor, int *borderColor, int thickness);
+static const char *searchKeyboardRows[] = {
+        "ABCDEFGHIJKL",
+        "MNOPQRSTUVWX",
+        "YZ0123456789",
+        " -_./+!?@#%&",
+        "=:;[](){}|<>"
+};
 
 void displayHeart(int x, int y) {
 	if(hideHeartTimer!=NULL) {
@@ -82,7 +142,11 @@ void drawPictureTextOnScreen(char *buf) {
 		} else {
 			strcpy(temp,buf);
 		}
+		#endif
 	} else {
+		#if defined MIYOOMINI
+		strcpy(temp,buf);
+		#else
 		if (favorites[CURRENT_GAME_NUMBER].frequency == OC_OC_LOW||favorites[CURRENT_GAME_NUMBER].frequency == OC_OC_HIGH) {
 			strcpy(temp,"+");
 			strcat(temp,buf);
@@ -136,20 +200,20 @@ void drawCurrentLetter(char *letter, int textColor[], int x, int y) {
 }
 
 void drawBigWhiteText(char *text) {
-	int white[3]={255, 255, 255};
+	int white[3]={253, 35, 39};
 	drawTextOnScreen(BIGFont, NULL, SCREEN_WIDTH/2, SCREEN_HEIGHT/2, text, white, VAlignMiddle | HAlignCenter, (int[]){}, 0);
 }
 
 void drawLoadingText() {
 	#ifndef NOLOADING
-	int white[3]={255, 255, 255};
+	int white[3]={253, 35, 39};
 	drawTextOnScreen(settingsFooterFont, NULL, SCREEN_WIDTH-calculateProportionalSizeOrDistance1(44), SCREEN_HEIGHT-calculateProportionalSizeOrDistance1(8), "LOADING...", white, VAlignMiddle | HAlignCenter, (int[]){}, 0);
 	refreshScreen();
 	#endif
 }
 
 void drawCopyingText() {
-	int white[3]={255, 255, 255};
+	int white[3]={253, 35, 39};
 	drawTextOnScreen(settingsFooterFont, NULL, SCREEN_WIDTH/2, SCREEN_HEIGHT/2, "COPYING FILES, PLEASE WAIT", white, VAlignMiddle | HAlignCenter, (int[]){}, 0);
 }
 
@@ -181,6 +245,74 @@ void drawSettingsOptionOnScreen(char *buf, int position, int txtColor[]) {
 	drawTextOnScreen(settingsfont, NULL, 5, position, buf, txtColor, VAlignBottom | HAlignLeft, (int[]){}, 0);
 }
 
+void drawScrolledShadedGameNameOnScreenCustom(char *buf, int position){
+	static unsigned int temppos=0;
+	static Uint32 initwait=0;
+
+	int width=MAGIC_NUMBER;
+	int retW = 1;
+	TTF_SizeUTF8(font, (const char *) buf, &retW, NULL);
+
+	// create the string
+	unsigned int buflen=strlen(buf);
+	char *temp;
+	if(retW>width)		// if retW > width, we need scroll, the concatenate 2 strings to do the trick
+		temp = malloc(buflen*2+5+2);
+	else
+		temp = malloc(buflen+2);
+	
+	// concatenate name+spaces+name
+	strcpy(temp,buf);
+	if(retW>width) {
+		strcat(temp,"     ");
+		strcat(temp,buf);
+	}
+
+	// set wait time before scroll
+	if(refreshName==0) {
+		temppos=0;
+		initwait=SDL_GetTicks();
+	}
+
+	// do scroll
+	if(retW>width) {				// if name is greater than gamelist width, then do scroll
+		refreshName=1;
+		if(SDL_GetTicks()-initwait>1000) {	// wait 1 second before scroll
+			temppos++;			// character index of the name to display
+			if(temppos>=buflen+5)
+				temppos=0;
+		}
+	} else {
+		refreshName=0;
+		temppos=0;
+	}
+	
+	int hAlign = 0;
+	if (gameListAlignment==0) {
+		hAlign = HAlignLeft;
+	} else if (gameListAlignment==1) {
+		hAlign = HAlignCenter;
+	} else {
+		hAlign = HAlignRight;
+	}
+
+	TTF_SizeUTF8(font, (const char *) &temp[temppos], &retW, NULL);
+	if (transparentShading) {
+		if (retW>width) {
+			drawTextOnScreenMaxWidth(font, outlineFont, gameListX, position, &temp[temppos], menuSections[currentSectionNumber].bodySelectedTextTextColor, VAlignBottom | hAlign, (int[]){}, 0, retW);
+		} else {
+			drawTextOnScreen(font, outlineFont, gameListX, position, &temp[temppos], menuSections[currentSectionNumber].bodySelectedTextTextColor, VAlignBottom | hAlign, (int[]){}, 0);
+		}
+	} else {
+		if (retW>width) {
+			drawTextOnScreenMaxWidth(font, outlineFont, gameListX, position, &temp[temppos], menuSections[currentSectionNumber].bodySelectedTextTextColor, VAlignBottom | hAlign, menuSections[currentSectionNumber].bodySelectedTextBackgroundColor, 1, retW);
+		} else {
+			drawTextOnScreen(font, outlineFont, gameListX, position, &temp[temppos], menuSections[currentSectionNumber].bodySelectedTextTextColor, VAlignBottom | hAlign, menuSections[currentSectionNumber].bodySelectedTextBackgroundColor, 1);
+		}
+	}
+	free(temp);
+}
+
 void drawShadedGameNameOnScreenCustom(char *buf, int position){
 	char *temp = malloc(strlen(buf)+2);
 	strcpy(temp,buf);
@@ -210,6 +342,7 @@ void drawShadedGameNameOnScreenCustom(char *buf, int position){
 		}
 	}
 	free(temp);
+	refreshName=0;
 }
 
 void drawNonShadedGameNameOnScreenCustom(char *buf, int position) {
@@ -263,10 +396,12 @@ void drawNonShadedGameNameOnScreenPicMode(char *buf, int position) {
 }
 
 void displayImageOnMenuScreen(char *fileName) {
-	SDL_Surface *screenshot = loadImage(fileName);
+	SDL_Surface *screenshot=NULL;
 
-	if(screenshot==NULL) {
-		screenshot = loadImage(menuSections[currentSectionNumber].noArtPicture);
+	if(showArt) {
+		screenshot = loadImage(fileName);
+		if(screenshot==NULL)
+			screenshot = loadImage(menuSections[currentSectionNumber].noArtPicture);
 	}
 
 	if (screenshot!=NULL) {
@@ -410,8 +545,13 @@ void initializeFonts() {
 	font = TTF_OpenFont(menuFont, fontSize);
 	outlineFont = TTF_OpenFont(menuFont, fontSize);
 
-	miniFont = TTF_OpenFont(menuFont, artTextFontSize);
-	outlineMiniFont = TTF_OpenFont(menuFont, artTextFontSize);
+        int searchFontSize = artTextFontSize - calculateProportionalSizeOrDistance1(5);
+        if (searchFontSize < calculateProportionalSizeOrDistance1(7)) {
+                searchFontSize = calculateProportionalSizeOrDistance1(7);
+        }
+        miniFont = TTF_OpenFont(menuFont, artTextFontSize);
+        outlineMiniFont = TTF_OpenFont(menuFont, artTextFontSize);
+        searchFont = TTF_OpenFont(menuFont, searchFontSize);
 
 	picModeFont = TTF_OpenFont(menuFont, fontSize+calculateProportionalSizeOrDistance1(5));
 	BIGFont = TTF_OpenFont(akashi, calculateProportionalSizeOrDistance1(16)+calculateProportionalSizeOrDistance1(17));
@@ -426,14 +566,15 @@ void initializeFonts() {
 
 	inMenuGameCountFont = TTF_OpenFont(textXFont, text2FontSize);
 	outlineCustomCountFont = TTF_OpenFont(textXFont, text2FontSize);
-	if (menuFont!=NULL && strlen(menuFont)>2) {
-		TTF_SetFontOutline(outlineFont,fontOutline);
-		TTF_SetFontOutline(outlineMiniFont,fontOutline);
-		TTF_SetFontOutline(outlineHeaderFont,fontOutline);
-		TTF_SetFontOutline(outlineFooterFont,fontOutline);
-		TTF_SetFontOutline(outlineCustomHeaderFont,fontOutline);
-		TTF_SetFontOutline(outlineCustomCountFont,fontOutline);
-	}
+        if (menuFont!=NULL && strlen(menuFont)>2) {
+                TTF_SetFontOutline(outlineFont,fontOutline);
+                TTF_SetFontOutline(outlineMiniFont,fontOutline);
+                TTF_SetFontOutline(outlineHeaderFont,fontOutline);
+                TTF_SetFontOutline(outlineFooterFont,fontOutline);
+                TTF_SetFontOutline(outlineCustomHeaderFont,fontOutline);
+                TTF_SetFontOutline(outlineCustomCountFont,fontOutline);
+                TTF_SetFontOutline(searchFont,fontOutline);
+        }
 
 	sectionCardsGameCountFont = TTF_OpenFont(gameCountFont, gameCountFontSize);
 
@@ -453,11 +594,13 @@ void freeFonts() {
 	inMenuGameCountFont = NULL;
 	TTF_CloseFont(footerFont);
 	footerFont = NULL;
-	TTF_CloseFont(picModeFont);
-	picModeFont = NULL;
-	TTF_CloseFont(miniFont);
-	miniFont = NULL;
-	TTF_CloseFont(BIGFont);
+        TTF_CloseFont(picModeFont);
+        picModeFont = NULL;
+        TTF_CloseFont(miniFont);
+        miniFont = NULL;
+        TTF_CloseFont(searchFont);
+        searchFont = NULL;
+        TTF_CloseFont(BIGFont);
 	BIGFont = NULL;
 	TTF_CloseFont(outlineCustomHeaderFont);
 	outlineCustomHeaderFont = NULL;
@@ -604,18 +747,18 @@ void showLetter(struct Rom *rom) {
 	int y = calculateProportionalSizeOrDistance1(231);
 	for (int i=0;i<27;i++) {
 		if (!letterExistsInGameList(letters[i], existingLetters)) {
-			textColor[0]=40;
-			textColor[1]=40;
-			textColor[2]=40;
+			textColor[0]=50;
+			textColor[1]=0;
+			textColor[2]=0;
 		} else {
 			textColor[0]=255;
 			textColor[1]=255;
 			textColor[2]=255;
 		}
 		if (strcmp(letters[i],currentGameFirstLetter)==0) {
-			textColor[0]=255;
-			textColor[1]=0;
-			textColor[2]=0;
+			textColor[0]=253;
+			textColor[1]=35;
+			textColor[2]=39;
 		}
 		if (strcmp(letters[i],"N")==0) {
 			x+=calculateProportionalSizeOrDistance1(14);
@@ -700,31 +843,34 @@ void showCurrentGroup() {
 
 void showRomPreferences() {
 	int textColor[3];
-	textColor[0]=90;
-	textColor[1]=90;
-	textColor[2]=90;
-	int valueColor[3] = {0,147,131};
-	int problematicGray[3] = {219,219,219};
+	textColor[0]=253;
+	textColor[1]=35;
+	textColor[2]=39;
+	int valueColor[3] = {255,255,255};
+	int problematicGray[3] = {124,0,2};
 	int textWidth;
 
 	char *emuName = malloc(strlen(CURRENT_SECTION.executables[CURRENT_SECTION.currentGameNode->data->preferences.emulator])+1);
 	strcpy(emuName,CURRENT_SECTION.executables[CURRENT_SECTION.currentGameNode->data->preferences.emulator]);
 	strcat(emuName,"\0");
-
+    
+    #if defined MIYOOMINI
+    #else
 	char *frequency = malloc(10);
 	snprintf(frequency, 10, "%d", CURRENT_SECTION.currentGameNode->data->preferences.frequency);
+    #endif
 
 	int width=calculateProportionalSizeOrDistance1(315);
 	int height = calculateProportionalSizeOrDistance1(72);
 
 	//Main rectangle
-	drawRectangleToScreen(width+calculateProportionalSizeOrDistance1(4), height+calculateProportionalSizeOrDistance1(4), SCREEN_WIDTH/2-(width/2+calculateProportionalSizeOrDistance1(2)), SCREEN_HEIGHT/2-(height/2+calculateProportionalSizeOrDistance1(2)), (int[]) {37,50,56});
+	drawRectangleToScreen(width+calculateProportionalSizeOrDistance1(4), height+calculateProportionalSizeOrDistance1(4), SCREEN_WIDTH/2-(width/2+calculateProportionalSizeOrDistance1(2)), SCREEN_HEIGHT/2-(height/2+calculateProportionalSizeOrDistance1(2)), (int[]) {50,0,0});
 
 	//Overlay
-	drawRectangleToScreen(width, height, SCREEN_WIDTH/2-width/2, SCREEN_HEIGHT/2-height/2, (int[]) {250,250,250});
+	drawRectangleToScreen(width, height, SCREEN_WIDTH/2-width/2, SCREEN_HEIGHT/2-height/2, (int[]) {0,0,0});
 
 	//Title Bar
-	drawRectangleToScreen(width, height/4, SCREEN_WIDTH/2-width/2, SCREEN_HEIGHT/2-height/2, (int[]){37,50,56});
+	drawRectangleToScreen(width, height/4, SCREEN_WIDTH/2-width/2, SCREEN_HEIGHT/2-height/2, (int[]){253,35,39});
 
 	//Selection
 	if (chosenChoosingOption==0) {
@@ -739,13 +885,12 @@ void showRomPreferences() {
 	char * name = getNameWithoutPath(CURRENT_SECTION.currentGameNode->data->name);
 	drawTextOnScreen(font, NULL, calculateProportionalSizeOrDistance1(6), (SCREEN_HEIGHT/2)-calculateProportionalSizeOrDistance1(28), name, (int[]) {255,255,255}, VAlignMiddle | HAlignLeft, (int[]){}, 0);
 	free(name);
+
 #if defined MIYOOMINI
-	TTF_SizeUTF8(font, (const char *) "Cpu speed: " , &textWidth, NULL);
+	TTF_SizeUTF8(font, (const char *) "Autostart: " , &textWidth, NULL);
 	textWidth+=calculateProportionalSizeOrDistance1(2);
 
-	//Frequency option text
-	drawTextOnScreen(font, NULL, (SCREEN_WIDTH/2)-width/2+calculateProportionalSizeOrDistance1(4), (SCREEN_HEIGHT/2)-calculateProportionalSizeOrDistance1(9), "Cpu speed: ", textColor, VAlignMiddle | HAlignLeft, (int[]){}, 0);
-	//Frequency option value
+    drawTextOnScreen(font, NULL, (SCREEN_WIDTH/2)-width/2+calculateProportionalSizeOrDistance1(4), (SCREEN_HEIGHT/2)-calculateProportionalSizeOrDistance1(9), "Set options for the game", textColor, VAlignMiddle | HAlignLeft, (int[]){}, 0);
 #else
 	TTF_SizeUTF8(font, (const char *) "Overclock: " , &textWidth, NULL);
 	textWidth+=calculateProportionalSizeOrDistance1(2);
@@ -753,27 +898,20 @@ void showRomPreferences() {
 	//Frequency option text
 	drawTextOnScreen(font, NULL, (SCREEN_WIDTH/2)-width/2+calculateProportionalSizeOrDistance1(4), (SCREEN_HEIGHT/2)-calculateProportionalSizeOrDistance1(9), "Overclock: ", textColor, VAlignMiddle | HAlignLeft, (int[]){}, 0);
 	//Frequency option value
-#endif
-#if defined TARGET_OD_BETA || defined TARGET_RFW || defined TARGET_BITTBOY || defined TARGET_PC // cpu contro in roms
+#if defined TARGET_OD_BETA || defined TARGET_RFW || defined TARGET_BITTBOY || defined TARGET_PC
 	if (CURRENT_SECTION.currentGameNode->data->preferences.frequency==OC_OC_LOW || CURRENT_SECTION.currentGameNode->data->preferences.frequency==OC_OC_HIGH) {
 		drawTextOnScreen(font, NULL, (SCREEN_WIDTH/2)-width/2+textWidth+1, (SCREEN_HEIGHT/2)-calculateProportionalSizeOrDistance1(9), "yes", valueColor, VAlignMiddle | HAlignLeft, (int[]){}, 0);
 	} else {
 		drawTextOnScreen(font, NULL, (SCREEN_WIDTH/2)-width/2+textWidth+1, (SCREEN_HEIGHT/2)-calculateProportionalSizeOrDistance1(9), "no", valueColor, VAlignMiddle | HAlignLeft, (int[]){}, 0);
 	}
 #else
-#if defined MIYOOMINI
-	if (CURRENT_SECTION.currentGameNode->data->preferences.frequency==CPU_NORMAL || CURRENT_SECTION.currentGameNode->data->preferences.frequency==CPU_HIGH) {
-		drawTextOnScreen(font, NULL, (SCREEN_WIDTH/2)-width/2+textWidth+1, (SCREEN_HEIGHT/2)-calculateProportionalSizeOrDistance1(9), "1200Mhz", valueColor, VAlignMiddle | HAlignLeft, (int[]){}, 0);
-	} else {
-		drawTextOnScreen(font, NULL, (SCREEN_WIDTH/2)-width/2+textWidth+1, (SCREEN_HEIGHT/2)-calculateProportionalSizeOrDistance1(9), "1000Mhz", valueColor, VAlignMiddle | HAlignLeft, (int[]){}, 0);
-	}
-#else
 	drawTextOnScreen(font, NULL, (SCREEN_WIDTH/2)-width/2+textWidth, (SCREEN_HEIGHT/2)-calculateProportionalSizeOrDistance1(9), "not available", valueColor, VAlignMiddle | HAlignLeft, (int[]){}, 0);
 #endif
-#endif
-
 	drawRectangleToScreen(width, calculateProportionalSizeOrDistance1(1), SCREEN_WIDTH/2-width/2,SCREEN_HEIGHT/2, problematicGray);
-
+#endif
+	
+	drawRectangleToScreen(width, calculateProportionalSizeOrDistance1(1), SCREEN_WIDTH/2-width/2,SCREEN_HEIGHT/2, problematicGray);	
+	
 	//Launch at boot option text
 	drawTextOnScreen(font, NULL, (SCREEN_WIDTH/2)-width/2+calculateProportionalSizeOrDistance1(4), (SCREEN_HEIGHT/2)+calculateProportionalSizeOrDistance1(9), "Autostart: ", textColor, VAlignMiddle | HAlignLeft, (int[]){}, 0);
 	//Launch at boot option value
@@ -791,16 +929,19 @@ void showRomPreferences() {
 	drawTextOnScreen(font, NULL, (SCREEN_WIDTH/2)-width/2+textWidth, (SCREEN_HEIGHT/2)+calculateProportionalSizeOrDistance1(27), emuName, valueColor, VAlignMiddle | HAlignLeft, (int[]){}, 0);
 
 	free(emuName);
+#if defined MIYOOMINI
+#else
 	free(frequency);
-
+#endif
+	
 	logMessage("INFO","showRomPreferences","Preferences shown");
 }
 
 void showConsole() {
 	int backgroundColor[3];
-	backgroundColor[0]=30;
-	backgroundColor[1]=30;
-	backgroundColor[2]=130;
+	backgroundColor[0]=0;
+	backgroundColor[1]=0;
+	backgroundColor[2]=0;
 	drawRectangleToScreen(SCREEN_WIDTH, SCREEN_HEIGHT, 0, 0, backgroundColor);
 	if (CURRENT_SECTION.systemLogoSurface!=NULL) {
 		displaySurface(CURRENT_SECTION.systemLogoSurface, 0, 0);
@@ -823,7 +964,7 @@ void showConsole() {
 		}
 
 	} else {
-		drawRectangleToScreen(SCREEN_WIDTH,SCREEN_HEIGHT,0,0,(int[]){180,180,180});
+		drawRectangleToScreen(SCREEN_WIDTH,SCREEN_HEIGHT,0,0,(int[]){253,35,39});
 		drawTextOnScreen(font,NULL,SCREEN_WIDTH/2,SCREEN_HEIGHT/2,CURRENT_SECTION.sectionName,(int[]){0,0,0},VAlignMiddle|HAlignCenter, (int[]){}, 0);
 	}
 	logMessage("INFO","showConsole","Current console shown");
@@ -1039,9 +1180,9 @@ void drawTimedShutDownScreen() {
 	}
 	snprintf(text1,30,"IN %d SECONDS",countDown);
 	snprintf(text2,30,"X TO CANCEL");
-	drawTextOnScreen(BIGFont, NULL, SCREEN_WIDTH/2, SCREEN_HEIGHT/4, text, (int[]){255,255,255}, VAlignMiddle | HAlignCenter, (int[]){0,0,0}, 0);
-	drawTextOnScreen(BIGFont, NULL, SCREEN_WIDTH/2, SCREEN_HEIGHT/2, text1, (int[]){255,255,255}, VAlignMiddle | HAlignCenter, (int[]){0,0,0}, 0);
-	drawTextOnScreen(BIGFont, NULL, SCREEN_WIDTH/2, SCREEN_HEIGHT-SCREEN_HEIGHT/4, text2, (int[]){255,255,255}, VAlignMiddle | HAlignCenter, (int[]){0,0,0}, 0);
+	drawTextOnScreen(BIGFont, NULL, SCREEN_WIDTH/2, SCREEN_HEIGHT/4, text, (int[]){253,35,39}, VAlignMiddle | HAlignCenter, (int[]){0,0,0}, 0);
+	drawTextOnScreen(BIGFont, NULL, SCREEN_WIDTH/2, SCREEN_HEIGHT/2, text1, (int[]){253,35,39}, VAlignMiddle | HAlignCenter, (int[]){0,0,0}, 0);
+	drawTextOnScreen(BIGFont, NULL, SCREEN_WIDTH/2, SCREEN_HEIGHT-SCREEN_HEIGHT/4, text2, (int[]){253,35,39}, VAlignMiddle | HAlignCenter, (int[]){0,0,0}, 0);
 }
 
 void drawShutDownScreen() {
@@ -1153,7 +1294,8 @@ void drawGameList() {
 					MAGIC_NUMBER = gameListWidth;
 					strcpy(currentGameNameBeingDisplayed,temp);
 					displayGamePictureInMenu(rom);
-					drawShadedGameNameOnScreenCustom(temp, nextLine);
+					drawScrolledShadedGameNameOnScreenCustom(temp, nextLine);
+					// drawShadedGameNameOnScreenCustom(temp, nextLine);
 				}
 			}
 		} else {
@@ -1194,27 +1336,57 @@ void setupDecorations() {
 }
 
 void drawBatteryMeter() {
-	int batteryLevel80to100[] = {1,255,1};
-	int batteryLevel60to80[] = {153,254,0};
-	int batteryLevel40to60[] = {255,254,3};
-	int batteryLevel20to40[] = {255,152,1};
-	int batteryLevel0to20[] = {255,51,0};
+	int batteryLevel95to100[] = {1,255,1};
+	int batteryLevel90to95[] = {1,255,1};
+	int batteryLevel85to90[] = {1,255,1};
+	int batteryLevel80to85[] = {1,255,1};
+	int batteryLevel75to80[] = {153,254,0};
+	int batteryLevel70to75[] = {153,254,0};
+	int batteryLevel65to70[] = {153,254,0};
+	int batteryLevel60to65[] = {153,254,0};
+	int batteryLevel55to60[] = {255,254,3};
+	int batteryLevel50to55[] = {255,254,3};
+	int batteryLevel45to50[] = {255,254,3};
+	int batteryLevel40to45[] = {255,254,3};
+	int batteryLevel35to40[] = {255,152,1};
+	int batteryLevel30to35[] = {255,152,1};
+	int batteryLevel25to30[] = {255,152,1};
+	int batteryLevel20to25[] = {255,152,1};
+	int batteryLevel15to20[] = {255,51,0};
+	int batteryLevel10to15[] = {255,51,0};
+	int batteryLevel5to10[] = {255,51,0};
+	int batteryLevel0to5[] = {255,51,0};
 
 	int gray5[]={121, 121, 121};
 
-	int *levels[5];
-	levels[0] = batteryLevel0to20;
-	levels[1] = batteryLevel20to40;
-	levels[2] = batteryLevel40to60;
-	levels[3] = batteryLevel60to80;
-	levels[4] = batteryLevel80to100;
+	int *levels[20];
+	levels[0] = batteryLevel0to5;
+	levels[1] = batteryLevel5to10;
+	levels[2] = batteryLevel10to15;
+	levels[3] = batteryLevel15to20;
+	levels[4] = batteryLevel20to25;
+	levels[5] = batteryLevel25to30;
+	levels[6] = batteryLevel30to35;
+	levels[7] = batteryLevel35to40;
+	levels[8] = batteryLevel40to45;
+	levels[9] = batteryLevel45to50;
+	levels[10] = batteryLevel50to55;
+	levels[11] = batteryLevel55to60;
+	levels[12] = batteryLevel60to65;
+	levels[13] = batteryLevel65to70;
+	levels[14] = batteryLevel70to75;
+	levels[15] = batteryLevel75to80;
+	levels[16] = batteryLevel80to85;
+	levels[17] = batteryLevel85to90;
+	levels[18] = batteryLevel90to95;
+	levels[19] = batteryLevel95to100;
 
 	drawRectangleToScreen(SCREEN_WIDTH, calculateProportionalSizeOrDistance1(4), 0, calculateProportionalSizeOrDistance1(42), gray5);
 	int pos = (lastChargeLevel);
 	logMessage("INFO","drawSettingsScreen","Positioning batt 1");
-	if (pos<6) {
+	if (pos<21) {
 		for (int i=pos-1;i>=0;i--) {
-			drawRectangleToScreen(SCREEN_WIDTH/5, calculateProportionalSizeOrDistance1(4), (SCREEN_WIDTH/5)*i, calculateProportionalSizeOrDistance1(42), levels[i]);
+			drawRectangleToScreen(SCREEN_WIDTH/20, calculateProportionalSizeOrDistance1(4), (SCREEN_WIDTH/20)*i, calculateProportionalSizeOrDistance1(42), levels[i]);
 		}
 	} else {
 		drawRectangleToScreen(SCREEN_WIDTH, calculateProportionalSizeOrDistance1(4), 0, calculateProportionalSizeOrDistance1(42), (int[]){80,80,255});
@@ -1222,12 +1394,12 @@ void drawBatteryMeter() {
 }
 
 void drawSpecialScreen(char *title, char **options, char** values, char** hints, int interactive) {
-	int headerAndFooterBackground[3]={37,50,56};
+	int headerAndFooterBackground[3]={253,35,39};
 	int headerAndFooterText[3]={255,255,255};
-	int bodyText[3]= {90,90,90};
-	int bodyHighlightedText[3]= {0,147,131};
-	int bodyBackground[3]={250,250,250};
-	int problematicGray[3] = {225,225,225};
+	int bodyText[3]= {253,35,39};
+	int bodyHighlightedText[3]= {255,255,255};
+	int bodyBackground[3]={0,0,0};
+	int problematicGray[3] = {124,0,2};
 
 	logMessage("INFO","drawSettingsScreen","Setting options and values");
 
@@ -1236,6 +1408,34 @@ void drawSpecialScreen(char *title, char **options, char** values, char** hints,
 	drawRectangleToScreen(SCREEN_WIDTH, calculateProportionalSizeOrDistance1(42), 0, 0, headerAndFooterBackground);
 	drawTextOnSettingsHeaderLeftWithColor(title,headerAndFooterText);
 
+	#if defined MIYOOMINI
+    if (strcmp(title, "SCREEN SETTINGS") == 0) {
+    int squareWidth = (((640-26)+10)/8)-10;
+    int squareHeight = 32;
+    int squareSpacing = 10;
+
+    int startX = 13;
+    int startY = 402;
+
+    int colors[8][3] = {
+        {255, 0, 0},
+        {0, 255, 0},
+        {0, 0, 255},
+        {255, 255, 0},
+        {0, 255, 255},
+        {255, 0, 255},
+        {255, 255, 255},
+        {125, 125, 125}
+    };
+
+    for (int i = 0; i < 8; i++) {
+        int color[3] = { colors[i][0], colors[i][1], colors[i][2] };
+        drawRectangleToScreen(squareWidth, squareHeight, startX, startY, color);
+        startX += squareWidth + squareSpacing;
+	}
+	}
+    #endif
+	
 	drawBatteryMeter();
 
 	int nextLine = calculateProportionalSizeOrDistance1(50);
@@ -1246,7 +1446,7 @@ void drawSpecialScreen(char *title, char **options, char** values, char** hints,
 	#elif defined TARGET_OD || defined TARGET_OD_BETA || defined TARGET_PC
 	int max = 9;
 	#else
-	int max = 8;
+	int max = 9;
 	#endif
 	logMessage("INFO","drawSettingsScreen","Defining number of items");
 	logMessage("INFO","drawSettingsScreen","About to go through items");
@@ -1279,7 +1479,7 @@ void drawSpecialScreen(char *title, char **options, char** values, char** hints,
 		}
 		drawSettingsOptionOnScreen(options[i], nextLineText, bodyText);
 		drawSettingsOptionValueOnScreen(values[i], nextLineText, bodyHighlightedText);
-		int lineColor[] = { 229,229,229};
+		int lineColor[] = { 50,0,0};
 		logMessage("INFO","drawSettingsScreen","Drawing rect");
 		if (i<max)  {
 			drawRectangleToScreen(SCREEN_WIDTH, calculateProportionalSizeOrDistance1(1), 0, nextLine+calculateProportionalSizeOrDistance1(15), lineColor);
@@ -1329,6 +1529,7 @@ void setupHelpScreen(int page) {
 
 			options[8]="B+Up/Down";
 			values[8]="Quick switch";
+			hints[0] = "PAGE 1/2 - PRESS B TO RETURN";
 			break;
 		case 2:
 			options[0] = "B+Select";
@@ -1336,12 +1537,9 @@ void setupHelpScreen(int page) {
 
 			options[1] = "B+X";
 			values[1] = "Delete game";
+			hints[0] = "PAGE 2/2 - PRESS B TO RETURN";
 			break;
 	}
-
-	char temp[300];
-	sprintf(temp,"PAGE %d/2 - PRESS B TO RETURN", page);
-	hints[0] = temp;
 }
 
 void setupAppearanceSettings() {
@@ -1375,22 +1573,27 @@ void setupScreenSettings() {
     options[0]="Lumination ";
 	values[0]=malloc(100);
 	sprintf(values[0], "%d", luminationValue);
-	hints[0] = "REBOOT TO APPLY AFTER CHANGING";
+	hints[0] = "CHANGE THE LUMINATION";
 
     options[1]="Hue ";
 	values[1]=malloc(100);
 	sprintf(values[1], "%d", hueValue);
-	hints[1] = "REBOOT TO APPLY AFTER CHANGING";
+	hints[1] = "CHANGE THE COLOR";
 
     options[2]="Saturation ";
 	values[2]=malloc(100);
 	sprintf(values[2], "%d", saturationValue);
-	hints[2] = "REBOOT TO APPLY AFTER CHANGING";
+	hints[2] = "CHANGE THE SATURATION";
 
     options[3]="Contrast ";
 	values[3]=malloc(100);
 	sprintf(values[3], "%d", contrastValue);
-	hints[3] = "REBOOT TO APPLY AFTER CHANGING";
+	hints[3] = "CHANGE THE CONTRAST";
+	
+	options[4]="Gamma ";
+	values[4]=malloc(100);
+	sprintf(values[4], "%d", gammaValue);
+	hints[4] = "CHANGE THE TEMP COLOR";
 }
 #endif
 
@@ -1409,7 +1612,8 @@ void setupSystemSettings() {
 	values[1]=malloc(100);
 	sprintf(values[1],"%d",brightnessValue);
 	hints[1] = "ADJUST BRIGHTNESS LEVEL";
-
+#if defined MIYOOMINI
+#else
 	options[2]="Sharpness ";
 	values[2]=malloc(100);
 //	char *temp = getenv("SDL_VIDEO_KMSDRM_SCALING_SHARPNESS");
@@ -1422,25 +1626,17 @@ void setupSystemSettings() {
 //	}
 	sprintf(values[2],"%d",sharpnessValue);
 	hints[2] = "ADJUST SHARPNESS LEVEL";
-
 	options[3]="Screen timeout ";
 	values[3]=malloc(100);
-#ifdef MIYOOMINI	
-	if (timeoutValue>0) {
-		sprintf(values[3],"%d",timeoutValue);
-	} else {
-		sprintf(values[3],"%s","always on");
-	}
-#else
 	if (timeoutValue>0&&hdmiEnabled==0) {
 		sprintf(values[3],"%d",timeoutValue);
 	} else {
 		sprintf(values[3],"%s","always on");
 	}
+	hints[3] = "MINUTES UNTIL THE SCREEN TURNS OFF";
 #endif
-	hints[3] = "SECONDS UNTIL THE SCREEN TURNS OFF";
 #if defined (MIYOOMINI)
-	options[4]="Cpu clock console";
+	options[2]="Cpu clock";
 #else
 	options[4]="Overclocking level";
 #endif
@@ -1458,27 +1654,24 @@ void setupSystemSettings() {
 	fscanf(fp, "%d", &max_freq);
     fclose(fp);
 	if (max_freq==1200000) {
-		CPUMIYOOValue=CPU_HIGH;
-		values[4]="1200Mhz";
+		values[2]="1200Mhz";
+	} else if (max_freq==1100000){
+		values[2]="1100Mhz";
 	} else if (max_freq==1000000){
-		CPUMIYOOValue=CPU_NORMAL;
-		values[4]="1000Mhz";
+		values[2]="1000Mhz";
 	} else if (max_freq==800000){
-		CPUMIYOOValue=CPU_MEDIO;
-		values[4]="800Mhz";
+		values[2]="800Mhz";
 	} else if (max_freq==600000){
-		CPUMIYOOValue=CPU_LOW;
-		values[4]="600Mhz";
+		values[2]="600Mhz";
 	} else if (max_freq==400000){
-		CPUMIYOOValue=CPU_ULTRALOW;
-		values[4]="400Mhz";
+		values[2]="400Mhz";
 	}
 #else
 	values[4]="not available";
 #endif
 #endif
 #if defined (MIYOOMINI)
-	hints[4] = "CHANGE THE CPU SPEED";
+	hints[2] = "CHANGE THE CPU SPEED";
 #else
 	hints[4] = "AFFECTS THE ROM MENU OC SETTING";
 #endif
@@ -1505,16 +1698,41 @@ void setupSystemSettings() {
 #endif
 	
 #if defined MIYOOMINI
-	options[6] = "Audio fix ";
+	options[3] = "Audio fix ";
     if (audioFix) {
-		values[6] = "yes";
+		values[3] = "yes";
 	} else {
-		values[6] = "no";
+		values[3] = "no";
 	}
-    hints[6] = "ENABLE OR DISABLE AUDIOSERVER";
+    hints[3] = "ENABLE OR DISABLE AUDIOSERVER";
+	
+	options[4]= "Music menu ";
+	if (musicEnabled) {
+		values[4] = "ON";
+	} else {
+		values[4] = "OFF";
+	}
+	hints[4] = "ENABLE OR DISABLE MUSIC MENU";
 
-    options[7]="Screen ";
-	hints[7] = "SCREEN OPTIONS";
+    options[5] = "Screen settings ";
+	hints[5] = "SCREEN OPTIONS";
+	
+	options[6]= "Loading screen ";
+	if (loadingScreenEnabled) {
+		values[6] = "ON";
+	} else {
+		values[6] = "OFF";
+	}
+	hints[6] = "ENABLE OR DISABLE LOADING SCREEN";
+	
+	options[7] = "Screen timeout ";
+	values[7] = malloc(100);
+	if (timeoutValue>0) {
+		sprintf(values[7],"%d",timeoutValue);
+	} else {
+		sprintf(values[7],"%s","always on");
+	}
+	hints[7] = "SECONDS UNTIL THE SCREEN TURNS OFF";
 #endif
 }
 
@@ -1562,19 +1780,57 @@ void setupSettingsScreen() {
 	char *themeName=getNameWithoutPath((themes[activeTheme]));
 	values[1] = themeName;
 	hints[1] = "LAUNCHER THEME";
-
+	#if defined MIYOOMINI
+	#else
 	options[2]="Default launcher ";
+	#endif
 	#ifdef MIYOOMINI
-	values[2] = "not available";
 	#else
 	if (shutDownEnabled) {
 		values[2] = "yes";
 	} else {
 		values[2] = "no";
 	}
-	#endif
+	
 	hints[2] = "LAUNCH AFTER BOOTING";
+	#endif
+	
+	#if defined MIYOOMINI
+	options[2]="Appearance ";
+	hints[2] = "APPEARANCE OPTIONS";
 
+	options[3]="System ";
+	hints[3] = "SYSTEM OPTIONS";
+	
+	if (mmModel) {
+		options[4]="RetroArch ";
+		hints[4] = "RETROARCH CONFIGURATION";
+
+		options[5]="Help ";
+		hints[5] = "HOW TO USE THIS MENU";
+	} else {
+		options[4]= "Autowifi ";
+		if (wifiEnabled) {
+			values[4] = "ON";
+		} else {
+			values[4] = "OFF";
+		}
+		hints[4] = "ENABLE OR DISABLE AUTO WIFI IN BOOT";
+		
+		options[5]= "Wifi ";
+		hints[5] = "WIFI MANAGER";
+		
+		options[6]="Scraper ";
+		hints[6] = "DOWNLOAD COVERS FROM SCREENSCRAPER";
+		
+		options[7]="RetroArch ";
+		hints[7] = "RETROARCH CONFIGURATION";
+
+		options[8]="Help ";
+		hints[8] = "HOW TO USE THIS MENU";
+	}
+
+	#else
 	options[3]="Appearance ";
 	hints[3] = "APPEARANCE OPTIONS";
 
@@ -1583,15 +1839,963 @@ void setupSettingsScreen() {
 
 	options[5]="Help ";
 	hints[5] = "HOW TO USE THIS MENU";
+	#endif
 }
 
 
 void clearOptionsValuesAndHints() {
-	for (int i=0; i<10; i++) {
-		options[i] = " ";
-		values[i] = " ";
-		hints[i] = " ";
+        for (int i=0; i<10; i++) {
+                options[i] = " ";
+                values[i] = " ";
+                hints[i] = " ";
+        }
+}
+
+static int getKeyboardRowLength(int row) {
+        return strlen(searchKeyboardRows[row]);
+}
+
+static int getKeyboardRowCount() {
+        return sizeof(searchKeyboardRows) / sizeof(searchKeyboardRows[0]);
+}
+
+static void clampKeyboardPosition() {
+        if (searchKeyboardRow < 0) {
+                searchKeyboardRow = 0;
+        }
+        if (searchKeyboardRow >= getKeyboardRowCount()) {
+                searchKeyboardRow = getKeyboardRowCount() - 1;
+        }
+        int maxCol = getKeyboardRowLength(searchKeyboardRow) - 1;
+        if (searchKeyboardCol < 0) {
+                searchKeyboardCol = 0;
+        }
+        if (searchKeyboardCol > maxCol) {
+                searchKeyboardCol = maxCol;
+        }
+}
+
+static void clampSearchSelection() {
+if (searchSelectionIndex >= searchResultsCount) {
+searchSelectionIndex = searchResultsCount > 0 ? searchResultsCount - 1 : 0;
+}
+if (searchSelectionIndex < 0) {
+searchSelectionIndex = 0;
+}
+}
+
+static void ensureSearchIndexPath() {
+if (strlen(searchIndexPath) == 0) {
+snprintf(searchIndexPath, sizeof(searchIndexPath), "%s/.simplemenu/search_index.dat", getenv("HOME"));
+}
+}
+
+static void resetSearchIndexEntries() {
+for (int i = 0; i < searchIndexCount; i++) {
+free(searchIndexEntries[i].displayName);
+}
+free(searchIndexEntries);
+searchIndexEntries = NULL;
+searchIndexCount = 0;
+searchIndexCapacity = 0;
+searchIndexMetaCount = 0;
+}
+
+void searchInvalidateIndex() {
+        resetSearchIndexEntries();
+        searchIndexReady = 0;
+}
+
+static void appendSearchIndexEntry(int sectionIndex, int romIndex, const char *displayName) {
+if (searchIndexCount >= searchIndexCapacity) {
+int newCapacity = searchIndexCapacity == 0 ? 256 : searchIndexCapacity * 2;
+SearchIndexEntry *resized = realloc(searchIndexEntries, newCapacity * sizeof(SearchIndexEntry));
+if (resized == NULL) {
+return;
+}
+searchIndexEntries = resized;
+searchIndexCapacity = newCapacity;
+}
+searchIndexEntries[searchIndexCount].sectionIndex = sectionIndex;
+searchIndexEntries[searchIndexCount].romIndex = romIndex;
+searchIndexEntries[searchIndexCount].displayName = strdup(displayName);
+searchIndexCount++;
+}
+
+static void recordSearchIndexSectionMeta(int sectionIndex, int gameCount) {
+if (searchIndexMetaCount < (int)(sizeof(searchIndexMeta) / sizeof(searchIndexMeta[0]))) {
+searchIndexMeta[searchIndexMetaCount].sectionIndex = sectionIndex;
+searchIndexMeta[searchIndexMetaCount].gameCount = gameCount;
+searchIndexMetaCount++;
+}
+}
+
+static void drawSearchIndexProgress(const char *message, int current, int total) {
+int backgroundColor[3] = {6, 6, 6};
+int borderColor[3] = {120, 95, 70};
+int fillColor[3] = {20, 18, 18};
+drawRectangleToScreen(SCREEN_WIDTH, SCREEN_HEIGHT, 0, 0, backgroundColor);
+int boxWidth = SCREEN_WIDTH - calculateProportionalSizeOrDistance1(40);
+int boxHeight = calculateProportionalSizeOrDistance1(80);
+int boxX = (SCREEN_WIDTH - boxWidth) / 2;
+int boxY = (SCREEN_HEIGHT - boxHeight) / 2;
+drawBoxWithBorder(boxX, boxY, boxWidth, boxHeight, fillColor, borderColor, 2);
+char progress[128];
+snprintf(progress, sizeof(progress), "%s (%d/%d)", message, current, total);
+drawTextOnScreen(searchFont, NULL, boxX + boxWidth/2, boxY + boxHeight/2 - calculateProportionalSizeOrDistance1(8), (char *)progress,
+        (int[]){235, 235, 235}, VAlignMiddle | HAlignCenter, (int[]){}, 0);
+int barWidth = boxWidth - calculateProportionalSizeOrDistance1(20);
+int barHeight = calculateProportionalSizeOrDistance1(12);
+int barX = boxX + calculateProportionalSizeOrDistance1(10);
+int barY = boxY + boxHeight - calculateProportionalSizeOrDistance1(22);
+drawBoxWithBorder(barX, barY, barWidth, barHeight, (int[]){35, 30, 30}, borderColor, 1);
+if (total > 0 && current > 0) {
+        int filledWidth = (barWidth * current) / total;
+        if (filledWidth > barWidth) {
+                filledWidth = barWidth;
+        }
+        drawRectangleToScreen(filledWidth, barHeight - 2, barX + 1, barY + 1, (int[]){245, 180, 68});
+}
+SDL_Flip(screen);
+}
+
+static int recountSectionGameCount(int sectionIndex) {
+        int previousSection = currentSectionNumber;
+        if (sectionIndex < 0 || sectionIndex >= menuSectionCounter) {
+                return 0;
+        }
+	currentSectionNumber = sectionIndex;
+	menuSections[sectionIndex].counted = 0;
+	int count = theSectionHasGames(&menuSections[sectionIndex]);
+	menuSections[sectionIndex].gameCount = count;
+	currentSectionNumber = previousSection;
+	return count;
+}
+
+static int currentGameCountForSection(int sectionIndex) {
+        return recountSectionGameCount(sectionIndex);
+}
+
+static void refreshSectionGameCountCache() {
+        searchSectionCountCacheSize = menuSectionCounter;
+        for (int sectionIndex = 0; sectionIndex < menuSectionCounter && sectionIndex < (int)(sizeof(searchSectionGameCountCache) / sizeof(searchSectionGameCountCache[0])); sectionIndex++) {
+                if (sectionIndex == favoritesSectionNumber) {
+                        searchSectionGameCountCache[sectionIndex] = 0;
+                        continue;
+                }
+                searchSectionGameCountCache[sectionIndex] = currentGameCountForSection(sectionIndex);
+        }
+}
+
+static int searchIndexMatchesCounts() {
+        int seenSections[100] = {0};
+        for (int i = 0; i < searchIndexMetaCount; i++) {
+                int sectionIndex = searchIndexMeta[i].sectionIndex;
+                if (sectionIndex == favoritesSectionNumber) {
+                        continue;
+                }
+                int currentCount = (sectionIndex < searchSectionCountCacheSize) ? searchSectionGameCountCache[sectionIndex] : currentGameCountForSection(sectionIndex);
+                seenSections[sectionIndex] = 1;
+                if (currentCount != searchIndexMeta[i].gameCount) {
+                        return 0;
+                }
+        }
+        for (int sectionIndex = 0; sectionIndex < menuSectionCounter; sectionIndex++) {
+                if (sectionIndex == favoritesSectionNumber) {
+                        continue;
+                }
+                int count = (sectionIndex < searchSectionCountCacheSize) ? searchSectionGameCountCache[sectionIndex] : currentGameCountForSection(sectionIndex);
+                if (count > 0 && !menuSections[sectionIndex].hidden && !seenSections[sectionIndex]) {
+                        return 0;
+                }
+        }
+        return 1;
+}
+
+static int loadSearchIndexFromDisk() {
+ensureSearchIndexPath();
+FILE *fp = fopen(searchIndexPath, "rb");
+if (fp == NULL) {
+return 0;
+}
+char magic[7] = {0};
+if (fread(magic, 1, 6, fp) != 6 || strncmp(magic, "SMIDX1", 6) != 0) {
+fclose(fp);
+return 0;
+}
+int storedSectionCount = 0;
+int storedEntryCount = 0;
+if (fread(&storedSectionCount, sizeof(int), 1, fp) != 1 || fread(&storedEntryCount, sizeof(int), 1, fp) != 1) {
+fclose(fp);
+return 0;
+}
+searchIndexMetaCount = 0;
+for (int i = 0; i < storedSectionCount; i++) {
+int sectionIndex = 0;
+int gameCount = 0;
+if (fread(&sectionIndex, sizeof(int), 1, fp) != 1 || fread(&gameCount, sizeof(int), 1, fp) != 1) {
+resetSearchIndexEntries();
+fclose(fp);
+return 0;
+}
+if (sectionIndex >= menuSectionCounter) {
+resetSearchIndexEntries();
+fclose(fp);
+return 0;
+}
+recordSearchIndexSectionMeta(sectionIndex, gameCount);
+}
+if (!searchIndexMatchesCounts()) {
+resetSearchIndexEntries();
+fclose(fp);
+return 0;
+}
+for (int i = 0; i < storedEntryCount; i++) {
+int sectionIndex = 0;
+int romIndex = 0;
+uint16_t nameLength = 0;
+if (fread(&sectionIndex, sizeof(int), 1, fp) != 1 || fread(&romIndex, sizeof(int), 1, fp) != 1 ||
+fread(&nameLength, sizeof(uint16_t), 1, fp) != 1) {
+resetSearchIndexEntries();
+fclose(fp);
+return 0;
+}
+char *buffer = malloc(nameLength + 1);
+if (buffer == NULL) {
+resetSearchIndexEntries();
+fclose(fp);
+return 0;
+}
+if (fread(buffer, 1, nameLength, fp) != nameLength) {
+free(buffer);
+resetSearchIndexEntries();
+fclose(fp);
+return 0;
+}
+buffer[nameLength] = '\0';
+appendSearchIndexEntry(sectionIndex, romIndex, buffer);
+free(buffer);
+}
+fclose(fp);
+searchIndexReady = 1;
+return 1;
+}
+
+static void persistSearchIndexToDisk() {
+ensureSearchIndexPath();
+char indexDir[PATH_MAX];
+snprintf(indexDir, sizeof(indexDir), "%s/.simplemenu", getenv("HOME"));
+mkdir(indexDir, 0755);
+FILE *fp = fopen(searchIndexPath, "wb");
+if (fp == NULL) {
+return;
+}
+const char magic[6] = "SMIDX1";
+fwrite(magic, 1, sizeof(magic), fp);
+fwrite(&searchIndexMetaCount, sizeof(int), 1, fp);
+fwrite(&searchIndexCount, sizeof(int), 1, fp);
+for (int i = 0; i < searchIndexMetaCount; i++) {
+fwrite(&searchIndexMeta[i].sectionIndex, sizeof(int), 1, fp);
+fwrite(&searchIndexMeta[i].gameCount, sizeof(int), 1, fp);
+}
+for (int i = 0; i < searchIndexCount; i++) {
+uint16_t length = strlen(searchIndexEntries[i].displayName);
+fwrite(&searchIndexEntries[i].sectionIndex, sizeof(int), 1, fp);
+fwrite(&searchIndexEntries[i].romIndex, sizeof(int), 1, fp);
+fwrite(&length, sizeof(uint16_t), 1, fp);
+fwrite(searchIndexEntries[i].displayName, 1, length, fp);
+}
+fclose(fp);
+}
+
+static int buildSearchIndex() {
+        resetSearchIndexEntries();
+        searchIndexReady = 0;
+        refreshSectionGameCountCache();
+        int sectionsWithGames = 0;
+        for (int sectionIndex = 0; sectionIndex < menuSectionCounter; sectionIndex++) {
+                if (sectionIndex == favoritesSectionNumber) {
+                        continue;
+                }
+                int count = (sectionIndex < searchSectionCountCacheSize) ? searchSectionGameCountCache[sectionIndex] : currentGameCountForSection(sectionIndex);
+                if (count > 0 && !menuSections[sectionIndex].hidden) {
+                        sectionsWithGames++;
+                }
+        }
+        int progress = 0;
+drawSearchIndexProgress("Preparing search index", progress, sectionsWithGames);
+for (int sectionIndex = 0; sectionIndex < menuSectionCounter; sectionIndex++) {
+                if (sectionIndex == favoritesSectionNumber) {
+                        continue;
+                }
+                int count = (sectionIndex < searchSectionCountCacheSize) ? searchSectionGameCountCache[sectionIndex] : currentGameCountForSection(sectionIndex);
+                if (count == 0 || menuSections[sectionIndex].hidden) {
+                        continue;
+                }
+recordSearchIndexSectionMeta(sectionIndex, count);
+progress++;
+drawSearchIndexProgress("Building search index", progress, sectionsWithGames);
+if (!ensureSectionInitialized(sectionIndex)) {
+continue;
+}
+struct Node *current = menuSections[sectionIndex].head;
+int index = 0;
+while (current != NULL) {
+char *name = getFileNameOrAlias(current->data);
+appendSearchIndexEntry(sectionIndex, index, name);
+free(name);
+current = current->next;
+index++;
+}
+}
+persistSearchIndexToDisk();
+searchIndexReady = 1;
+return 1;
+}
+
+static int ensureSearchIndexReady() {
+        refreshSectionGameCountCache();
+        if (searchIndexReady && searchIndexMatchesCounts()) {
+                return 1;
+        }
+        resetSearchIndexEntries();
+        if (loadSearchIndexFromDisk()) {
+                return 1;
+}
+return buildSearchIndex();
+}
+
+static int ensureSectionInitialized(int sectionIndex) {
+        if (sectionIndex < 0 || sectionIndex >= menuSectionCounter) {
+                return 0;
+        }
+        if (menuSections[sectionIndex].initialized) {
+                return 1;
+        }
+        int previousSection = currentSectionNumber;
+        int previousState = currentState;
+        currentSectionNumber = sectionIndex;
+        loadGameList(0);
+        currentState = previousState;
+        currentSectionNumber = previousSection;
+        return menuSections[sectionIndex].initialized;
+}
+
+static void ellipsizeTextForWidth(TTF_Font *fontToUse, const char *text, int maxWidth, char *out, size_t outSize) {
+        if (outSize == 0) {
+                return;
+        }
+        if (text == NULL) {
+                out[0] = '\0';
+                return;
+        }
+
+        int fullWidth = 0;
+        getTextWidth(fontToUse, text, &fullWidth);
+        if (fullWidth <= maxWidth || maxWidth <= 0) {
+                snprintf(out, outSize, "%s", text);
+                return;
+        }
+
+        const char *ellipsis = "...";
+
+        size_t len = strlen(text);
+        while (len > 0) {
+                char candidate[600];
+                snprintf(candidate, sizeof(candidate), "%.*s%s", (int)len, text, ellipsis);
+                int candidateWidth = 0;
+                getTextWidth(fontToUse, candidate, &candidateWidth);
+                if (candidateWidth <= maxWidth || len == 1) {
+                        snprintf(out, outSize, "%s", candidate);
+                        return;
+                }
+                len--;
+        }
+
+        snprintf(out, outSize, "%s", ellipsis);
+}
+
+static void drawHighlightedText(TTF_Font *fontToUse, int x, int y, char *text, char *query, int *baseColor, int *highlightColor) {
+        if (query == NULL || strlen(query) == 0) {
+                drawTextOnScreen(fontToUse, NULL, x, y, text, baseColor, VAlignMiddle | HAlignLeft, (int[]){}, 0);
+                return;
+        }
+        char *match = strcasestr(text, query);
+        if (match == NULL) {
+                drawTextOnScreen(fontToUse, NULL, x, y, text, baseColor, VAlignMiddle | HAlignLeft, (int[]){}, 0);
+                return;
+        }
+
+        int prefixLength = match - text;
+        int matchLength = strlen(query);
+        char prefix[600] = "";
+        char highlighted[200] = "";
+        char suffix[600] = "";
+
+        strncpy(prefix, text, prefixLength);
+        prefix[prefixLength] = '\0';
+        strncpy(highlighted, match, matchLength);
+        highlighted[matchLength] = '\0';
+        strcpy(suffix, match + matchLength);
+
+        int prefixWidth = 0;
+        int highlightedWidth = 0;
+        getTextWidth(fontToUse, prefix, &prefixWidth);
+        getTextWidth(fontToUse, highlighted, &highlightedWidth);
+
+        if (strlen(prefix) > 0) {
+                drawTextOnScreen(fontToUse, NULL, x, y, prefix, baseColor, VAlignMiddle | HAlignLeft, (int[]){}, 0);
+        }
+        drawTextOnScreen(fontToUse, NULL, x + prefixWidth, y, highlighted, highlightColor, VAlignMiddle | HAlignLeft, (int[]){}, 0);
+        if (strlen(suffix) > 0) {
+                drawTextOnScreen(fontToUse, NULL, x + prefixWidth + highlightedWidth, y, suffix, baseColor, VAlignMiddle | HAlignLeft, (int[]){}, 0);
+        }
+}
+
+static int getSearchResultsStartIndex(int maxVisible) {
+        if (searchResultsCount <= maxVisible) {
+                return 0;
+        }
+        int startIndex = searchSelectionIndex - (maxVisible / 2);
+        if (startIndex < 0) {
+                startIndex = 0;
+        }
+        int maxStart = searchResultsCount - maxVisible;
+        if (startIndex > maxStart) {
+                startIndex = maxStart;
+        }
+        return startIndex;
+}
+
+static void resetSearchState() {
+        searchKeyboardRow = 0;
+        searchKeyboardCol = 0;
+        searchSelectionIndex = 0;
+        searchFocusOnResults = 0;
+        memset(searchQuery, 0, sizeof(searchQuery));
+        searchResultsCount = 0;
+        searchTotalMatches = 0;
+}
+
+static void rebuildSearchResults() {
+        searchResultsCount = 0;
+        searchTotalMatches = 0;
+        if ((int)strlen(searchQuery) == 0) {
+                searchSelectionIndex = 0;
+                searchFocusOnResults = 0;
+                return;
+        }
+        if (!ensureSearchIndexReady()) {
+                return;
+        }
+        int maxResults = sizeof(searchResults) / sizeof(searchResults[0]);
+        for (int i = 0; i < searchIndexCount; i++) {
+                        if (strcasestr(searchIndexEntries[i].displayName, searchQuery) != NULL) {
+                                searchTotalMatches++;
+                                if (searchResultsCount < maxResults) {
+                                        searchResults[searchResultsCount].sectionIndex = searchIndexEntries[i].sectionIndex;
+                                        searchResults[searchResultsCount].romIndex = searchIndexEntries[i].romIndex;
+                                        searchResults[searchResultsCount].displayName = searchIndexEntries[i].displayName;
+                                        searchResultsCount++;
+                                }
+                        }
+                }
+        clampSearchSelection();
+        if (searchResultsCount > 0) {
+                if (searchSelectionIndex >= searchResultsCount) {
+                        searchSelectionIndex = searchResultsCount - 1;
+                }
+        } else {
+                searchSelectionIndex = 0;
+                searchFocusOnResults = 0;
+        }
+}
+
+static void appendCharacterToQuery(char character) {
+        if ((int)strlen(searchQuery) >= (int)sizeof(searchQuery) - 1) {
+                return;
+        }
+        int currentLength = strlen(searchQuery);
+        searchQuery[currentLength] = toupper(character);
+        searchQuery[currentLength + 1] = '\0';
+        rebuildSearchResults();
+        searchSelectionIndex = 0;
+}
+
+static void deleteCharacterFromQuery() {
+        int len = strlen(searchQuery);
+        if (len > 0) {
+                searchQuery[len - 1] = '\0';
+                rebuildSearchResults();
+                searchSelectionIndex = 0;
+                if (strlen(searchQuery) == 0) {
+                        searchFocusOnResults = 0;
+                }
+        }
+}
+
+static void clearSearchQuery() {
+        memset(searchQuery, 0, sizeof(searchQuery));
+        rebuildSearchResults();
+        searchSelectionIndex = 0;
+        searchFocusOnResults = 0;
+}
+
+static void applyKeyboardSelection() {
+        clampKeyboardPosition();
+        char selectedChar = searchKeyboardRows[searchKeyboardRow][searchKeyboardCol];
+        if (selectedChar == '<') {
+                deleteCharacterFromQuery();
+                return;
+        }
+        if (selectedChar == ' ') {
+                appendCharacterToQuery(' ');
+                return;
+        }
+        appendCharacterToQuery(selectedChar);
+}
+
+static void moveSelectionDown() {
+        if (searchFocusOnResults) {
+                if (searchSelectionIndex < searchResultsCount - 1) {
+                        searchSelectionIndex++;
+                }
+        } else {
+                searchKeyboardRow++;
+                clampKeyboardPosition();
+        }
+}
+
+static void moveSelectionUp() {
+        if (searchFocusOnResults) {
+                if (searchSelectionIndex > 0) {
+                        searchSelectionIndex--;
+                }
+        } else {
+                searchKeyboardRow--;
+                clampKeyboardPosition();
+        }
+}
+
+static void moveSelectionLeft() {
+        if (searchFocusOnResults) {
+                searchFocusOnResults = 0;
+        } else {
+                searchKeyboardCol--;
+                clampKeyboardPosition();
+        }
+}
+
+static void moveSelectionRight() {
+        if (searchFocusOnResults) {
+                searchFocusOnResults = 0;
+        } else {
+                searchKeyboardCol++;
+                clampKeyboardPosition();
+        }
+}
+
+static void toggleSearchFocus() {
+        if (searchResultsCount > 0) {
+                searchFocusOnResults = 1 - searchFocusOnResults;
+        }
+}
+
+static void jumpToSearchSelection() {
+        if (searchResultsCount == 0) {
+                return;
+        }
+        SearchResult result = searchResults[searchSelectionIndex];
+
+        closeSearchWindow();
+        refreshScreen();
+        SDL_Delay(40);
+
+        if (ensureSectionInitialized(result.sectionIndex)) {
+                if (currentSectionNumber != result.sectionIndex) {
+                        currentSectionNumber = result.sectionIndex;
+                        struct MenuSection *sec = &menuSections[currentSectionNumber];
+                        if (sec->systemLogoSurface == NULL && sec->systemLogo[0] != '\0') {
+                                sec->systemLogoSurface = IMG_Load(sec->systemLogo);
+                        }
+                        if (sec->backgroundSurface == NULL && sec->background[0] != '\0') {
+                                sec->backgroundSurface = IMG_Load(sec->background);
+                        }
+                        if (sec->systemPictureSurface == NULL && sec->systemPicture[0] != '\0') {
+                                sec->systemPictureSurface = IMG_Load(sec->systemPicture);
+                        }
+                } else {
+                        currentSectionNumber = result.sectionIndex;
+                }
+
+                scrollToGame(result.romIndex);
+                currentState = BROWSING_GAME_LIST;
+                previousState = currentState;
+                refreshRequest = 1;
+                refreshScreen();
+                SDL_Delay(20);
+        }
+}
+
+static void drawBoxWithBorder(int x, int y, int width, int height, int *fillColor, int *borderColor, int thickness) {
+        drawRectangleToScreen(width, height, x, y, fillColor);
+        drawRectangleToScreen(width, thickness, x, y, borderColor);
+        drawRectangleToScreen(width, thickness, x, y + height - thickness, borderColor);
+        drawRectangleToScreen(thickness, height, x, y, borderColor);
+        drawRectangleToScreen(thickness, height, x + width - thickness, y, borderColor);
+}
+
+static void drawSearchKeyboard(int startX, int startY, int availableWidth, int cellHeight) {
+        int maxRowLength = 0;
+        for (int row = 0; row < getKeyboardRowCount(); row++) {
+                int length = getKeyboardRowLength(row);
+                if (length > maxRowLength) {
+                        maxRowLength = length;
+                }
+        }
+
+        int cellWidth = availableWidth / (maxRowLength > 0 ? maxRowLength : 1);
+        int height = getKeyboardRowCount() * cellHeight;
+        int strokeColor[3] = {96, 80, 64};
+        int darkFill[3] = {18, 15, 15};
+        int gridFill[3] = {38, 38, 38};
+        int selectedFill[3] = {240, 190, 80};
+        int selectedText[3] = {15, 12, 8};
+        int textColor[3] = {220, 220, 220};
+
+        drawBoxWithBorder(startX, startY, availableWidth, height, darkFill, strokeColor, 2);
+
+        for (int row = 0; row < getKeyboardRowCount(); row++) {
+                int rowLength = getKeyboardRowLength(row);
+                for (int col = 0; col < rowLength; col++) {
+                        char character = searchKeyboardRows[row][col];
+                        char label[7] = {0};
+                        if (character == ' ') {
+                                strcpy(label, "SPC");
+                        } else if (character == '<') {
+                                strcpy(label, "DEL");
+                        } else {
+                                snprintf(label, sizeof(label), "%c", character);
+                        }
+
+                        int blockX = startX + (col * cellWidth);
+                        int blockY = startY + (row * cellHeight);
+                        int isSelected = (!searchFocusOnResults && row == searchKeyboardRow && col == searchKeyboardCol);
+                        int *cellFill = isSelected ? selectedFill : gridFill;
+                        int *fontColor = isSelected ? selectedText : textColor;
+
+                        drawRectangleToScreen(cellWidth, cellHeight, blockX, blockY, cellFill);
+                        drawRectangleToScreen(cellWidth, 1, blockX, blockY, strokeColor);
+                        drawRectangleToScreen(cellWidth, 1, blockX, blockY + cellHeight - 1, strokeColor);
+                        drawRectangleToScreen(1, cellHeight, blockX, blockY, strokeColor);
+                        drawRectangleToScreen(1, cellHeight, blockX + cellWidth - 1, blockY, strokeColor);
+
+                        drawTextOnScreen(searchFont, NULL, blockX + cellWidth/2, blockY + cellHeight/2, label, fontColor, VAlignMiddle | HAlignCenter, (int[]){}, 0);
+                }
+        }
+}
+
+static void drawSearchResults(int startX, int startY, int listWidth, int listHeight, int maxVisible, int rowHeight) {
+        if (maxVisible < 1) {
+                maxVisible = 1;
+        }
+        if (strlen(searchQuery) == 0) {
+                return;
+        }
+        int startIndex = getSearchResultsStartIndex(maxVisible);
+        int endIndex = searchResultsCount < startIndex + maxVisible ? searchResultsCount : startIndex + maxVisible;
+        int rowWidth = listWidth - calculateProportionalSizeOrDistance1(10);
+        int leftPadding = calculateProportionalSizeOrDistance1(4);
+        int rightPadding = calculateProportionalSizeOrDistance1(4);
+
+        for (int i = startIndex; i < endIndex; i++) {
+                SearchResult result = searchResults[i];
+                const char *displayName = result.displayName != NULL ? result.displayName : "";
+                int y = startY + ((i - startIndex) * rowHeight);
+                int isSelected = (searchFocusOnResults && i == searchSelectionIndex);
+                int yTop = y;
+                int *textColor = isSelected ? (int[]){255, 220, 80} : (int[]){235, 235, 235};
+                int *highlightColor = isSelected ? (int[]){12, 8, 6} : (int[]){245, 180, 68};
+                int *bulletColor = isSelected ? (int[]){255, 140, 0} : (int[]){70, 62, 54};
+                int *lineColor = isSelected ? (int[]){245, 180, 68} : (int[]){70, 62, 54};
+                int *rowFill = isSelected ? (int[]){180, 90, 30} : (int[]){24, 22, 20};
+                
+                drawRectangleToScreen(rowWidth, rowHeight - 1, startX, yTop, rowFill);
+                drawRectangleToScreen(rowWidth, 1, startX, yTop, lineColor);
+                drawRectangleToScreen(rowWidth, 1, startX, yTop + rowHeight - 2, lineColor);
+                drawRectangleToScreen(2, rowHeight - 1, startX, yTop, lineColor);
+                int bulletWidth = 0;
+                getTextWidth(searchFont, "■ ", &bulletWidth);
+                int rowCenterY = yTop + (rowHeight / 2);
+                int bulletX = startX + leftPadding;
+                int textX = startX + bulletWidth + calculateProportionalSizeOrDistance1(2) + leftPadding;
+                drawTextOnScreen(searchFont, NULL, bulletX, rowCenterY, "■", bulletColor, VAlignMiddle | HAlignLeft, (int[]){}, 0);
+                int availableWidth = rowWidth - (textX - startX) - rightPadding;
+                char trimmedName[600];
+                ellipsizeTextForWidth(searchFont, displayName, availableWidth, trimmedName, sizeof(trimmedName));
+                drawHighlightedText(searchFont, textX, rowCenterY, trimmedName, searchQuery, textColor, highlightColor);
+        }
+
+        if (searchResultsCount == 0) {
+                drawTextOnScreen(searchFont, NULL, startX + calculateProportionalSizeOrDistance1(4), startY + rowHeight / 2, "No matches", (int[]){200,200,200}, VAlignMiddle | HAlignLeft, (int[]){}, 0);
+        }
+
+        int remaining = searchTotalMatches - (endIndex);
+        if (remaining > 0) {
+                char moreLabel[80];
+                snprintf(moreLabel, sizeof(moreLabel), "+%d more...", remaining);
+                int footerY = startY + listHeight - calculateProportionalSizeOrDistance1(4);
+                drawTextOnScreen(searchFont, NULL, startX + calculateProportionalSizeOrDistance1(4), footerY, moreLabel, (int[]){180,180,180}, VAlignMiddle | HAlignLeft, (int[]){}, 0);
+        }
+}
+
+static void drawSearchOverlay() {
+        drawTransparentRectangleToScreen(SCREEN_WIDTH, SCREEN_HEIGHT, 0, 0, (int[]){0,0,0}, 185);
+
+        int padding = calculateProportionalSizeOrDistance1(6);
+        int margin = calculateProportionalSizeOrDistance1(5);
+        int panelX = margin;
+        int panelY = margin;
+        int panelWidth = SCREEN_WIDTH - (margin * 2);
+        int panelHeight = SCREEN_HEIGHT - (margin * 2);
+
+        int frameColor[3] = {115, 95, 80};
+        int fillColor[3] = {14, 13, 13};
+        int accentColor[3] = {245, 180, 68};
+        int labelColor[3] = {220, 220, 220};
+
+        drawBoxWithBorder(panelX, panelY, panelWidth, panelHeight, fillColor, frameColor, 2);
+
+        int textHeight = TTF_FontHeight(searchFont);
+        if (textHeight <= 0) {
+                textHeight = calculateProportionalSizeOrDistance1(10);
+        }
+        int headerHeight = textHeight + calculateProportionalSizeOrDistance1(4);
+        int headerY = panelY + padding;
+        int titleX = panelX + padding + calculateProportionalSizeOrDistance1(2);
+        int titleWidth = 0;
+        getTextWidth(searchFont, "SEARCH", &titleWidth);
+        drawTextOnScreen(searchFont, NULL, titleX, headerY + headerHeight / 2, "SEARCH", labelColor, VAlignMiddle | HAlignLeft, (int[]){}, 0);
+
+        int querySpacing = calculateProportionalSizeOrDistance1(8);
+        int queryX = titleX + titleWidth + querySpacing;
+        int queryWidth = panelWidth - padding - queryX;
+        int queryHeight = headerHeight;
+        drawBoxWithBorder(queryX, headerY, queryWidth, queryHeight, (int[]){22, 20, 18}, frameColor, 1);
+        char queryLabel[220];
+        snprintf(queryLabel, sizeof(queryLabel), "> %s", strlen(searchQuery)>0?searchQuery:"_");
+        drawTextOnScreen(searchFont, NULL, queryX + calculateProportionalSizeOrDistance1(4), headerY + queryHeight/2, queryLabel, accentColor, VAlignMiddle | HAlignLeft, (int[]){}, 0);
+
+        int contentTop = headerY + headerHeight + calculateProportionalSizeOrDistance1(6);
+        int helpHeight = textHeight + calculateProportionalSizeOrDistance1(4);
+        int keyboardCellHeight = textHeight + calculateProportionalSizeOrDistance1(1);
+        int keyboardHeight = getKeyboardRowCount() * keyboardCellHeight + 2;
+        int keyboardGap = calculateProportionalSizeOrDistance1(4);
+        int helpY = panelY + panelHeight - padding - helpHeight;
+        int keyboardY = helpY - keyboardGap - keyboardHeight;
+
+        int resultsWidth = panelWidth - (padding * 2);
+        int resultsHeight = keyboardY - calculateProportionalSizeOrDistance1(8) - contentTop;
+        int resultsRowHeight = textHeight + calculateProportionalSizeOrDistance1(2);
+        int maxVisible = resultsRowHeight > 0 ? resultsHeight / resultsRowHeight : 0;
+        if (resultsHeight < resultsRowHeight) {
+                resultsHeight = resultsRowHeight;
+        }
+        if (maxVisible > 22) {
+                maxVisible = 22;
+        }
+        if (maxVisible < 1) {
+                maxVisible = 1;
+        }
+
+        drawBoxWithBorder(panelX + padding, contentTop, resultsWidth, resultsHeight, (int[]){20, 18, 18}, frameColor, 1);
+        drawSearchResults(panelX + padding, contentTop + calculateProportionalSizeOrDistance1(2), resultsWidth, resultsHeight - calculateProportionalSizeOrDistance1(4), maxVisible, resultsRowHeight);
+
+        drawSearchKeyboard(panelX + padding, keyboardY, resultsWidth, keyboardCellHeight);
+        drawRectangleToScreen(resultsWidth, 1, panelX + padding, keyboardY - calculateProportionalSizeOrDistance1(3), frameColor);
+
+        drawTextOnScreen(searchFont, NULL, panelX + padding, helpY + helpHeight/2, "[A] select [X] switch kbd/list [B] del [Y] clear [L1] close", labelColor, VAlignMiddle | HAlignLeft, (int[]){}, 0);
+}
+
+static void drawBrowsingState(struct Rom *rom) {
+        if (fullscreenMode) {
+                if (currentSectionNumber == favoritesSectionNumber || CURRENT_SECTION.gameCount>0) {
+                        logMessage("INFO","updateScreen","Fullscreen mode");
+                        displayGamePicture(rom);
+                        drawGameList();
+                        displayHeart(SCREEN_WIDTH/2, SCREEN_HEIGHT/2);
+                }
+        } else {
+                logMessage("INFO","updateScreen","Menu mode");
+                displaySurface(CURRENT_SECTION.backgroundSurface, 0, 0);
+                drawGameList();
+                if (battX>-1 && surfaceBatt1!= NULL) {
+                        switch (lastChargeLevel) {
+                                case 1:
+                                        displaySurface(surfaceBatt1, battX, battY);
+                                        break;
+                                case 2:
+                                        displaySurface(surfaceBatt2, battX, battY);
+                                        break;
+                                case 3:
+                                        displaySurface(surfaceBatt3, battX, battY);
+                                        break;
+                                case 4:
+                                        displaySurface(surfaceBatt4, battX, battY);
+                                        break;
+                                case 5:
+                                        displaySurface(surfaceBatt5, battX, battY);
+                                        break;
+                                case 6:
+                                        displaySurface(surfaceBatt6, battX, battY);
+                                        break;
+                                case 7:
+                                        displaySurface(surfaceBatt7, battX, battY);
+                                        break;
+                                case 8:
+                                        displaySurface(surfaceBatt8, battX, battY);
+                                        break;
+                                case 9:
+                                        displaySurface(surfaceBatt9, battX, battY);
+                                        break;
+                                case 10:
+                                        displaySurface(surfaceBatt10, battX, battY);
+                                        break;
+                                case 11:
+                                        displaySurface(surfaceBatt11, battX, battY);
+                                        break;
+                                case 12:
+                                        displaySurface(surfaceBatt12, battX, battY);
+                                        break;
+                                case 13:
+                                        displaySurface(surfaceBatt13, battX, battY);
+                                        break;
+                                case 14:
+                                        displaySurface(surfaceBatt14, battX, battY);
+                                        break;
+                                case 15:
+                                        displaySurface(surfaceBatt15, battX, battY);
+                                        break;
+                                case 16:
+                                        displaySurface(surfaceBatt16, battX, battY);
+                                        break;
+                                case 17:
+                                        displaySurface(surfaceBatt17, battX, battY);
+                                        break;
+                                case 18:
+                                        displaySurface(surfaceBatt18, battX, battY);
+                                        break;
+                                case 19:
+                                        displaySurface(surfaceBatt19, battX, battY);
+                                        break;
+                                case 20:
+                                        displaySurface(surfaceBatt20, battX, battY);
+                                        break;
+                                default:
+                                        displaySurface(surfaceBattCharging, battX, battY);
+                                        break;
+                        }
+                }
+                if (wifiX>-1 && surfaceWifiOff!= NULL) {
+                        switch (lastWifiMode) {
+                                case 0:
+                                        displaySurface(surfaceWifiOff, wifiX, wifiY);
+                                        break;
+                                case 1:
+                                        displaySurface(surfaceWifiOn, wifiX, wifiY);
+                                        break;
+                                case 2:
+                                        displaySurface(surfaceNoWifi, wifiX, wifiY);
+                                        break;
+                                default:
+                                        displaySurface(surfaceWifiOff, wifiX, wifiY);
+                                        break;
+                        }
+                }
+                setupDecorations(rom);
+        }
+        if (CURRENT_SECTION.alphabeticalPaging) {
+                logMessage("INFO","updateScreen","Show alphabetical navigation bar");
+                if (rom->name!=NULL) {
+                        showLetter(rom);
+                }
+        }
+        if (CURRENT_SECTION.gameCount==0) {
+                if(fullscreenMode) {
+                        drawRectangleToScreen(SCREEN_WIDTH, SCREEN_HEIGHT, 0, 0, (int[]){0,0,0});
+                }
+                generateError("NO GAMES FOUND-FOR THIS SECTION GROUP", 0);
+                showErrorMessage(errorMessage);
+        }
+}
+
+void openSearchWindow() {
+	searchPreviousState = currentState;
+	resetSearchState();
+	if (!ensureSearchIndexReady()) {
+		return;
 	}
+	rebuildSearchResults();
+	currentState = SEARCHING_ROMS;
+	refreshRequest = 1;
+}
+
+void closeSearchWindow() {
+        searchFocusOnResults = 0;
+        searchSelectionIndex = 0;
+        aKeyComboWasPressed = 0;
+        hotKeyPressed = 0;
+        resetSearchState();
+        CURRENT_SECTION.alphabeticalPaging = 0;
+        currentState = isSettingsState(searchPreviousState) ? BROWSING_GAME_LIST : searchPreviousState;
+        previousState = currentState;
+        if (currentState != BROWSING_GAME_LIST && currentState != SELECTING_SECTION) {
+                currentState = BROWSING_GAME_LIST;
+	}
+	refreshRequest = 1;
+}
+
+void handleSearchInput(int key) {
+	if (key == BTN_L1) {
+		closeSearchWindow();
+		return;
+	}
+	if (key == BTN_UP) {
+			moveSelectionUp();
+        } else if (key == BTN_DOWN) {
+                        moveSelectionDown();
+        } else if (key == BTN_LEFT) {
+                        if (searchFocusOnResults) {
+                               for (int i = 0; i < 10; i++) {
+				                    moveSelectionUp();
+			                        }
+                        } else {
+                                moveSelectionLeft();
+                        }
+        } else if (key == BTN_RIGHT) {
+                        if (searchFocusOnResults) {
+                               for (int i = 0; i < 10; i++) {
+				                    moveSelectionDown();
+			                        }
+                        } else {
+                                moveSelectionRight();
+                        }
+        } else if (key == BTN_Y) {
+                        clearSearchQuery();
+        } else if (key == BTN_X) {
+                        toggleSearchFocus();
+        } else if (key == BTN_B) {
+                        deleteCharacterFromQuery();
+        } else if (key == BTN_A) {
+                        if (searchFocusOnResults) {
+                                jumpToSearchSelection();
+                        } else {
+                                applyKeyboardSelection();
+                        }
+        } else if (key == BTN_START) {
+                        jumpToSearchSelection();
+        }
+        refreshRequest = 1;
 }
 
 void updateScreen(struct Node *node) {
@@ -1602,61 +2806,18 @@ void updateScreen(struct Node *node) {
 		rom = node->data;
 	}
 	if (!itsStoppedBecauseOfAnError) {
-		switch(currentState) {
-			case BROWSING_GAME_LIST:
-				if (fullscreenMode) {
-					if (currentSectionNumber == favoritesSectionNumber || CURRENT_SECTION.gameCount>0) {
-						logMessage("INFO","updateScreen","Fullscreen mode");
-						displayGamePicture(rom);
-						drawGameList();
-						displayHeart(SCREEN_WIDTH/2, SCREEN_HEIGHT/2);
-					}
-				} else {
-					logMessage("INFO","updateScreen","Menu mode");
-					displaySurface(CURRENT_SECTION.backgroundSurface, 0, 0);
-					drawGameList();
-					if (battX>-1 && surfaceBatt1!= NULL) {
-						switch (lastChargeLevel) {
-							case 1:
-								displaySurface(surfaceBatt1, battX, battY);
-								break;
-							case 2:
-								displaySurface(surfaceBatt2, battX, battY);
-								break;
-							case 3:
-								displaySurface(surfaceBatt3, battX, battY);
-								break;
-							case 4:
-								displaySurface(surfaceBatt4, battX, battY);
-								break;
-							case 5:
-								displaySurface(surfaceBatt5, battX, battY);
-								break;
-							default:
-								displaySurface(surfaceBattCharging, battX, battY);
-								break;
-						}
-					}
-					setupDecorations(rom);
-				}
-				if (CURRENT_SECTION.alphabeticalPaging) {
-					logMessage("INFO","updateScreen","Show alphabetical navigation bar");
-					if (rom->name!=NULL) {
-						showLetter(rom);
-					}
-				}
-				if (CURRENT_SECTION.gameCount==0) {
-					if(fullscreenMode) {
-						drawRectangleToScreen(SCREEN_WIDTH, SCREEN_HEIGHT, 0, 0, (int[]){0,0,0});
-					}
-					generateError("NO GAMES FOUND-FOR THIS SECTION GROUP", 0);
-					showErrorMessage(errorMessage);
-				}
-				break;
-			case SETTINGS_SCREEN:
-				clearOptionsValuesAndHints();
-				setupSettingsScreen();
-				drawSpecialScreen("SETTINGS", options, values, hints, 1);
+                switch(currentState) {
+                        case BROWSING_GAME_LIST:
+                                drawBrowsingState(rom);
+                                break;
+                        case SEARCHING_ROMS:
+                                drawBrowsingState(rom);
+                                drawSearchOverlay();
+                                break;
+                        case SETTINGS_SCREEN:
+                                clearOptionsValuesAndHints();
+                                setupSettingsScreen();
+                                drawSpecialScreen("SETTINGS", options, values, hints, 1);
 				break;
 			case HELP_SCREEN_1:
 				clearOptionsValuesAndHints();
@@ -1682,17 +2843,183 @@ void updateScreen(struct Node *node) {
             case SCREEN_SETTINGS:
 				clearOptionsValuesAndHints();
 				setupScreenSettings();
-				drawSpecialScreen("SCREEN", options, values, hints, 1);
+				drawSpecialScreen("SCREEN SETTINGS", options, values, hints, 1);
 				break;
 #endif
 			case CHOOSING_GROUP:
 				showCurrentGroup();
+				if (battX>-1 && surfaceBatt1!= NULL) {
+						switch (lastChargeLevel) {
+							case 1:
+								displaySurface(surfaceBatt1, battX, battY);
+								break;
+							case 2:
+								displaySurface(surfaceBatt2, battX, battY);
+								break;
+							case 3:
+								displaySurface(surfaceBatt3, battX, battY);
+								break;
+							case 4:
+								displaySurface(surfaceBatt4, battX, battY);
+								break;
+							case 5:
+								displaySurface(surfaceBatt5, battX, battY);
+								break;
+							case 6:
+								displaySurface(surfaceBatt6, battX, battY);
+								break;
+							case 7:
+								displaySurface(surfaceBatt7, battX, battY);
+								break;
+							case 8:
+								displaySurface(surfaceBatt8, battX, battY);
+								break;
+							case 9:
+								displaySurface(surfaceBatt9, battX, battY);
+								break;
+							case 10:
+								displaySurface(surfaceBatt10, battX, battY);
+								break;
+							case 11:
+								displaySurface(surfaceBatt11, battX, battY);
+								break;
+							case 12:
+								displaySurface(surfaceBatt12, battX, battY);
+								break;
+							case 13:
+								displaySurface(surfaceBatt13, battX, battY);
+								break;
+							case 14:
+								displaySurface(surfaceBatt14, battX, battY);
+								break;
+							case 15:
+								displaySurface(surfaceBatt15, battX, battY);
+								break;
+							case 16:
+								displaySurface(surfaceBatt16, battX, battY);
+								break;
+							case 17:
+								displaySurface(surfaceBatt17, battX, battY);
+								break;
+							case 18:
+								displaySurface(surfaceBatt18, battX, battY);
+								break;
+							case 19:
+								displaySurface(surfaceBatt19, battX, battY);
+								break;
+							case 20:
+								displaySurface(surfaceBatt20, battX, battY);
+								break;							
+							default:
+								displaySurface(surfaceBattCharging, battX, battY);
+								break;
+						}
+					}
+				if (wifiX>-1 && surfaceWifiOff!= NULL) {
+						switch (lastWifiMode) {
+							case 0:
+								displaySurface(surfaceWifiOff, wifiX, wifiY);
+								break;
+							case 1:
+								displaySurface(surfaceWifiOn, wifiX, wifiY);
+								break;
+							case 2:
+								displaySurface(surfaceNoWifi, wifiX, wifiY);
+								break;
+							default:
+								displaySurface(surfaceWifiOff, wifiX, wifiY);
+								break;
+						}
+					}
 				break;
 			case SELECTING_EMULATOR:
 				showRomPreferences();
 				break;
 			case SELECTING_SECTION:
 				showConsole();
+				if (battX>-1 && surfaceBatt1!= NULL) {
+						switch (lastChargeLevel) {
+							case 1:
+								displaySurface(surfaceBatt1, battX, battY);
+								break;
+							case 2:
+								displaySurface(surfaceBatt2, battX, battY);
+								break;
+							case 3:
+								displaySurface(surfaceBatt3, battX, battY);
+								break;
+							case 4:
+								displaySurface(surfaceBatt4, battX, battY);
+								break;
+							case 5:
+								displaySurface(surfaceBatt5, battX, battY);
+								break;
+							case 6:
+								displaySurface(surfaceBatt6, battX, battY);
+								break;
+							case 7:
+								displaySurface(surfaceBatt7, battX, battY);
+								break;
+							case 8:
+								displaySurface(surfaceBatt8, battX, battY);
+								break;
+							case 9:
+								displaySurface(surfaceBatt9, battX, battY);
+								break;
+							case 10:
+								displaySurface(surfaceBatt10, battX, battY);
+								break;
+							case 11:
+								displaySurface(surfaceBatt11, battX, battY);
+								break;
+							case 12:
+								displaySurface(surfaceBatt12, battX, battY);
+								break;
+							case 13:
+								displaySurface(surfaceBatt13, battX, battY);
+								break;
+							case 14:
+								displaySurface(surfaceBatt14, battX, battY);
+								break;
+							case 15:
+								displaySurface(surfaceBatt15, battX, battY);
+								break;
+							case 16:
+								displaySurface(surfaceBatt16, battX, battY);
+								break;
+							case 17:
+								displaySurface(surfaceBatt17, battX, battY);
+								break;
+							case 18:
+								displaySurface(surfaceBatt18, battX, battY);
+								break;
+							case 19:
+								displaySurface(surfaceBatt19, battX, battY);
+								break;
+							case 20:
+								displaySurface(surfaceBatt20, battX, battY);
+								break;								
+							default:
+								displaySurface(surfaceBattCharging, battX, battY);
+								break;
+						}
+					}
+				if (wifiX>-1 && surfaceWifiOff!= NULL) {
+						switch (lastWifiMode) {
+							case 0:
+								displaySurface(surfaceWifiOff, wifiX, wifiY);
+								break;
+							case 1:
+								displaySurface(surfaceWifiOn, wifiX, wifiY);
+								break;
+							case 2:
+								displaySurface(surfaceNoWifi, wifiX, wifiY);
+								break;
+							default:
+								displaySurface(surfaceWifiOff, wifiX, wifiY);
+								break;
+						}
+					}
 				break;
 			case SHUTTING_DOWN:
 				drawShutDownScreen();
@@ -1815,10 +3142,10 @@ void resetHideHeartTimer() {
 }
 
 void clearBatteryTimer() {
-	if (batteryTimer != NULL) {
-		SDL_RemoveTimer(batteryTimer);
-	}
-	batteryTimer = NULL;
+        if (batteryTimer != NULL) {
+                SDL_RemoveTimer(batteryTimer);
+        }
+        batteryTimer = NULL;
 }
 
 uint32_t batteryCallBack() {
@@ -1830,6 +3157,39 @@ uint32_t batteryCallBack() {
 
 void startBatteryTimer() {
 	batteryTimer=SDL_AddTimer(1 * 60e3, batteryCallBack, NULL);
+}
+
+void clearWifiTimer() {
+	if (wifiTimer != NULL) {
+		SDL_RemoveTimer(wifiTimer);
+	}
+	wifiTimer = NULL;
+}
+
+uint32_t wifiCallBack() {
+	lastWifiMode=getCurrentWifi();
+	refreshRequest=1;
+	return 60000;
+}
+
+void startWifiTimer() {
+        wifiTimer=SDL_AddTimer(1 * 60e3, wifiCallBack, NULL);
+}
+
+void clearActiveRefreshTimer() {
+        if (activeRefreshTimer != NULL) {
+                SDL_RemoveTimer(activeRefreshTimer);
+        }
+        activeRefreshTimer = NULL;
+}
+
+uint32_t activeRefreshCallBack() {
+        refreshRequest=1;
+        return 5 * 1e3;
+}
+
+void startActiveRefreshTimer() {
+        activeRefreshTimer=SDL_AddTimer(5 * 1e3, activeRefreshCallBack, NULL);
 }
 
 void freeResources() {

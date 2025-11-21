@@ -16,6 +16,9 @@
 #define SYSTEM_SETTINGS 12
 #if defined MIYOOMINI
 #define SCREEN_SETTINGS 13
+#define SEARCHING_ROMS 14
+#else
+#define SEARCHING_ROMS 13
 #endif
 
 #include <pthread.h>
@@ -66,6 +69,8 @@ extern SDL_TimerID picModeHideMenuTimer;
 extern SDL_TimerID picModeHideLogoTimer;
 extern SDL_TimerID hideHeartTimer;
 extern SDL_TimerID batteryTimer;
+extern SDL_TimerID wifiTimer;
+extern SDL_TimerID activeRefreshTimer;
 
 typedef struct thread_picture {
 	  SDL_Surface* display;
@@ -101,13 +106,21 @@ extern int DEFAULT_OPTION;
 extern int USB_OPTION;
 #if defined MIYOOMINI
 extern int AUDIOFIX_OPTION;
+extern int LOADING_OPTION;
+extern int WIFI_OPTION;
+extern int WIFIAPP_OPTION;
+extern int RETROARCH_OPTION;
+extern int SCRAPER_OPTION;
+extern int MUSIC_OPTION;
 extern int SCREEN_OPTION;
 extern int LUMINATION_OPTION;
 extern int HUE_OPTION;
 extern int SATURATION_OPTION;
 extern int CONTRAST_OPTION;
+extern int GAMMA_OPTION;
 extern int NUM_SCREEN_OPTIONS;
 extern int COLOR_MAX_VALUE;
+extern int GAMMA_MAX_VALUE;
 #endif
 extern int VOLUME_OPTION;
 extern int BRIGHTNESS_OPTION;
@@ -140,18 +153,20 @@ extern int OC_SLEEP;
 extern int backlightValue;
 extern int hdmiChanged;
 #if defined MIYOOMINI
+extern int volume;
 extern int CPUMIYOO;
-extern int CPUMIYOOValue;
-extern int CPU_HIGH;
-extern int CPU_NORMAL;
-extern int CPU_MEDIO;
-extern int CPU_LOW;
-extern int CPU_ULTRALOW;
-extern char cpuclock[200];
+extern char cpuclock0[200];
+extern char cpuclock1[200];
 extern int audioFix;
+extern int Fix;
+extern int brightness;
+extern int loadingScreenEnabled;
+extern int musicEnabled;
+extern int wifiEnabled;
 extern int luminationValue;
 extern int volValue;
 extern int hueValue;
+extern int gammaValue;
 extern int saturationValue;
 extern int contrastValue;
 extern int mmModel;
@@ -187,10 +202,48 @@ extern char batt4[1000];
 extern SDL_Surface* surfaceBatt4;
 extern char batt5[1000];
 extern SDL_Surface* surfaceBatt5;
+extern char batt6[1000];
+extern SDL_Surface* surfaceBatt6;
+extern char batt7[1000];
+extern SDL_Surface* surfaceBatt7;
+extern char batt8[1000];
+extern SDL_Surface* surfaceBatt8;
+extern char batt9[1000];
+extern SDL_Surface* surfaceBatt9;
+extern char batt10[1000];
+extern SDL_Surface* surfaceBatt10;
+extern char batt11[1000];
+extern SDL_Surface* surfaceBatt11;
+extern char batt12[1000];
+extern SDL_Surface* surfaceBatt12;
+extern char batt13[1000];
+extern SDL_Surface* surfaceBatt13;
+extern char batt14[1000];
+extern SDL_Surface* surfaceBatt14;
+extern char batt15[1000];
+extern SDL_Surface* surfaceBatt15;
+extern char batt16[1000];
+extern SDL_Surface* surfaceBatt16;
+extern char batt17[1000];
+extern SDL_Surface* surfaceBatt17;
+extern char batt18[1000];
+extern SDL_Surface* surfaceBatt18;
+extern char batt19[1000];
+extern SDL_Surface* surfaceBatt19;
+extern char batt20[1000];
+extern SDL_Surface* surfaceBatt20;
 extern char battCharging[1000];
 extern SDL_Surface* surfaceBattCharging;
 extern int battX;
 extern int battY;
+extern char wifioff[1000];
+extern SDL_Surface* surfaceWifiOff;
+extern char wifion[1000];
+extern SDL_Surface* surfaceWifiOn;
+extern char nowifi[1000];
+extern SDL_Surface* surfaceNoWifi;
+extern int wifiX;
+extern int wifiY;
 extern int text1FontSize;
 extern int newspaperMode;
 extern int text1X;
@@ -228,6 +281,8 @@ extern int fontOutline;
 extern int displaySectionGroupName;
 extern int showArt;
 extern int refreshRequest;
+extern int refreshName;
+extern int refreshCounter;
 
 extern int displayGameCount;
 extern char gameCountFont[1000];
@@ -263,13 +318,19 @@ struct Favorite {
 	char executable[200];
 	char filesDirectory[400];
 	int isConsoleApp;
+#if defined MIYOOMINI
+#else
 	int frequency;
+#endif
 };
 
 struct RomPreferences {
 	int emulator;
 	int emulatorDir;
+#if defined MIYOOMINI
+#else
 	int frequency;
+#endif
 };
 
 struct Rom {
@@ -366,6 +427,7 @@ extern int BTN_L1;
 extern int BTN_R1;
 extern int BTN_L2;
 extern int BTN_R2;
+extern int BTN_MENU;
 
 #if defined TARGET_OD || defined TARGET_OD_BETA
 extern Shake_Device *device;
@@ -390,6 +452,7 @@ extern struct tm * currTime;
 extern int lastSec;
 extern int lastMin;
 extern int lastChargeLevel;
+extern int lastWifiMode;
 extern pthread_t clockThread;
 extern pthread_mutex_t lock;
 

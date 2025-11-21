@@ -4,7 +4,6 @@
 #include <stdlib.h>
 #include <string.h>
 #include <unistd.h>
-
 #if defined TARGET_OD || defined TARGET_OD_BETA
 #include <shake.h>
 #endif
@@ -191,17 +190,18 @@ void launchAutoStartGame(struct Rom *rom, char *emuDir, char *emuExec) {
 	}
 	logMessage("INFO","launchAutoStartGame","Saving last state");
 	saveLastState();
+	#if defined MIYOOMINI
+	if (CURRENT_SECTION.onlyFileNamesNoExtension) {
+		logMessage("INFO","launchAutoStartGame","Executing");
+		executeCommand(emuDir, emuExec, getGameName(rom->name), rom->isConsoleApp);
+	} else {
+		logMessage("INFO","launchAutoStartGame","Executing 2");
+		executeCommand(emuDir, emuExec, rom->name, rom->isConsoleApp);
+	}
+	#else
 	int freq = rom->preferences.frequency;
 	//if it's not the base clock freq
 	if (freq!=OC_NO) {
-		#if defined MIYOOMINI
-		if (freq!=CPUMIYOOValue) {
-			//Change the freq
-			//Save the rom prefs
-			rom->preferences.frequency = CPUMIYOOValue;
-			saveRomPreferences(rom);
-		}
-		#else
 		//then it's overclocked
 		//if it's not the configured level of OC
 		if (freq!=OCValue) {
@@ -210,7 +210,6 @@ void launchAutoStartGame(struct Rom *rom, char *emuDir, char *emuExec) {
 			rom->preferences.frequency = OCValue;
 			saveRomPreferences(rom);
 		}
-		#endif
 	}
 	if (CURRENT_SECTION.onlyFileNamesNoExtension) {
 		logMessage("INFO","launchAutoStartGame","Executing");
@@ -219,6 +218,7 @@ void launchAutoStartGame(struct Rom *rom, char *emuDir, char *emuExec) {
 		logMessage("INFO","launchAutoStartGame","Executing 2");
 		executeCommand(emuDir, emuExec, rom->name, rom->isConsoleApp, rom->preferences.frequency);
 	}
+	#endif
 }
 
 void launchGame(struct Rom *rom) {
@@ -239,47 +239,38 @@ void launchGame(struct Rom *rom) {
 			generateError(error,0);
 			return;
 		}
+		#if defined MIYOOMINI
+		executeCommand(favorite.emulatorFolder,favorite.executable,favorite.name, favorite.isConsoleApp);
+    	#else
 		int freq = favorite.frequency;
 		//if it's not the base clock freq
 		if (freq!=OC_NO) {
 			//then it's overclocked
 			//if it's not the configured level of OC
-			#if defined MIYOOMINI
-			if (freq!=CPUMIYOOValue) {
-				//Change the freq to curent OC
-				favorite.frequency = CPUMIYOOValue;
-			}
-			#else
 			if (freq!=OCValue) {
 				//Change the freq to curent OC
 				favorite.frequency = OCValue;
 			}
-			#endif
 		}
 		executeCommand(favorite.emulatorFolder,favorite.executable,favorite.name, favorite.isConsoleApp, favorite.frequency);
+		#endif
 	} else if (rom->name!=NULL) {
 		loadRomPreferences(rom);
+		#if defined MIYOOMINI
+		#else
 		int freq = rom->preferences.frequency;
 		//if it's not the base clock freq
 		if (freq!=OC_NO) {
 			//then it's overclocked
 			//if it's not the configured level of OC
-			#if defined MIYOOMINI
-			if (freq!=CPUMIYOOValue) {
-				//Change the freq
-				//Save the rom prefs
-				rom->preferences.frequency = CPUMIYOOValue;
-				saveRomPreferences(rom);
-			}
-			#else
 			if (freq!=OCValue) {
 				//Change the freq
 				//Save the rom prefs
 				rom->preferences.frequency = OCValue;
 				saveRomPreferences(rom);
 			}
-			#endif
 		}
+		#endif
 		if (isLaunchAtBoot(rom->name)) {
 			setRunningFlag();
 		}
@@ -296,59 +287,59 @@ void launchGame(struct Rom *rom) {
 			generateError(error,0);
 			return;
 		}
+		#if defined MIYOOMINI
+		if (CURRENT_SECTION.onlyFileNamesNoExtension) {
+			executeCommand(CURRENT_SECTION.emulatorDirectories[rom->preferences.emulatorDir], CURRENT_SECTION.executables[rom->preferences.emulator],getGameName(rom->name), rom->isConsoleApp);
+		} else {
+			executeCommand(CURRENT_SECTION.emulatorDirectories[rom->preferences.emulatorDir], CURRENT_SECTION.executables[rom->preferences.emulator],rom->name, rom->isConsoleApp);
+		}
+		#else
 		if (CURRENT_SECTION.onlyFileNamesNoExtension) {
 			executeCommand(CURRENT_SECTION.emulatorDirectories[rom->preferences.emulatorDir], CURRENT_SECTION.executables[rom->preferences.emulator],getGameName(rom->name), rom->isConsoleApp, rom->preferences.frequency);
 		} else {
 			executeCommand(CURRENT_SECTION.emulatorDirectories[rom->preferences.emulatorDir], CURRENT_SECTION.executables[rom->preferences.emulator],rom->name, rom->isConsoleApp, rom->preferences.frequency);
 		}
+		#endif
 	}
 }
 
 void launchEmulator(struct Rom *rom) {
 	if (isFavoritesSectionSelected() && favoritesSize > 0) {
 		struct Favorite favorite = favorites[CURRENT_GAME_NUMBER];
+		#if defined MIYOOMINI
+		executeCommand(favorite.emulatorFolder,favorite.executable,"*", favorite.isConsoleApp);
+		#else
 		int freq = favorite.frequency;
 		//if it's not the base clock freq
 		if (freq!=OC_NO) {
 			//then it's overclocked
 			//if it's not the configured level of OC
-			#if defined MIYOOMINI
-			if (freq!=CPUMIYOOValue) {
-				//Change the freq to curent OC
-				favorite.frequency = CPUMIYOOValue;
-			}
-			#else
 			if (freq!=OCValue) {
 				//Change the freq to curent OC
 				favorite.frequency = OCValue;
 			}
-			#endif
 		}
 		executeCommand(favorite.emulatorFolder,favorite.executable,"*", favorite.isConsoleApp, favorite.frequency);
+		#endif
 	} else if (rom->name!=NULL) {
 		loadRomPreferences(rom);
+		#if defined MIYOOMINI
+		executeCommand(CURRENT_SECTION.emulatorDirectories[CURRENT_SECTION.currentGameNode->data->preferences.emulatorDir], CURRENT_SECTION.executables[CURRENT_SECTION.currentGameNode->data->preferences.emulator],"*", 0);
+		#else
 		int freq = rom->preferences.frequency;
 		//if it's not the base clock freq
 		if (freq!=OC_NO) {
 			//then it's overclocked
 			//if it's not the configured level of OC
-			#if defined MIYOOMINI
-			if (freq!=CPUMIYOOValue) {
-				//Change the freq
-				rom->preferences.frequency = CPUMIYOOValue;
-				//Save the rom prefs
-				saveRomPreferences(rom);
-			}
-			#else
 			if (freq!=OCValue) {
 				//Change the freq
 				rom->preferences.frequency = OCValue;
 				//Save the rom prefs
 				saveRomPreferences(rom);
 			}
-			#endif
 		}
 		executeCommand(CURRENT_SECTION.emulatorDirectories[CURRENT_SECTION.currentGameNode->data->preferences.emulatorDir], CURRENT_SECTION.executables[CURRENT_SECTION.currentGameNode->data->preferences.emulator],"*", 0, rom->preferences.frequency);
+		#endif
 	}
 }
 
@@ -529,7 +520,10 @@ void removeFavorite() {
 			strcpy(favorites[i].alias,favorites[i+1].alias);
 			strcpy(favorites[i].sectionAlias,favorites[i+1].sectionAlias);
 			favorites[i].isConsoleApp = favorites[i+1].isConsoleApp;
+			#if defined MIYOOMINI
+			#else
 			favorites[i].frequency = favorites[i+1].frequency;
+			#endif
 		}
 		strcpy(favorites[favoritesSize-1].section,"\0");
 		strcpy(favorites[favoritesSize-1].emulatorFolder,"\0");
@@ -538,7 +532,10 @@ void removeFavorite() {
 		strcpy(favorites[favoritesSize-1].name,"\0");
 		strcpy(favorites[favoritesSize-1].alias,"\0");
 		strcpy(favorites[favoritesSize-1].sectionAlias,"\0");
+		#if defined MIYOOMINI
+		#else
 		favorites[favoritesSize-1].frequency = OC_NO;
+		#endif
 		favorites[favoritesSize-1].isConsoleApp = 0;
 		favoritesSize--;
 		if (CURRENT_GAME_NUMBER==favoritesSize) {
@@ -601,7 +598,10 @@ void markAsFavorite(struct Rom *rom) {
 			loadRomPreferences(rom);
 			strcpy(favorites[favoritesSize].emulatorFolder,CURRENT_SECTION.emulatorDirectories[rom->preferences.emulatorDir]);
 			strcpy(favorites[favoritesSize].executable,CURRENT_SECTION.executables[rom->preferences.emulator]);
+			#if defined MIYOOMINI
+			#else
 			favorites[favoritesSize].frequency = rom->preferences.frequency;
+			#endif
 			strcpy(favorites[favoritesSize].filesDirectory,rom->directory);
 			favorites[favoritesSize].isConsoleApp = rom->isConsoleApp;
 			favoritesSize++;
@@ -801,8 +801,10 @@ void performScreenSettingsChoosingAction() {
     HUE_OPTION = 1;
     SATURATION_OPTION = 2;
     CONTRAST_OPTION = 3;
-    NUM_SCREEN_OPTIONS = 4;
+	GAMMA_OPTION = 4;
+    NUM_SCREEN_OPTIONS = 5;
     COLOR_MAX_VALUE = 20;
+	GAMMA_MAX_VALUE = 5;
 
 	if (keys[BTN_UP]) {
 		if(chosenSetting>0) {
@@ -819,48 +821,100 @@ void performScreenSettingsChoosingAction() {
 	} else if (keys[BTN_LEFT]||keys[BTN_RIGHT]) {
 		if (chosenSetting==LUMINATION_OPTION) {
 			if (keys[BTN_LEFT]) {
-				if (luminationValue>1) {
+				if (luminationValue>0) {
+					int value = 0;
+					int get = 0;
+					get = getCurrentSystemValue("lumination");
 					luminationValue-=1;
+					value = (get+35)-1;
+					Luma(0, value);
 				}
 			} else {
 				if (luminationValue<COLOR_MAX_VALUE) {
+					int value = 0;
+					int get = 0;
+					get = getCurrentSystemValue("lumination");
 					luminationValue+=1;
+					value = (get+35)+1;
+					Luma(0, value);
 				}
 			}
 			setSystemValue("lumination", luminationValue);
 		} else if (chosenSetting==HUE_OPTION) {
 			if (keys[BTN_LEFT]) {
-				if (hueValue>1) {
+				if (hueValue>0) {
+					int value = 0;
+					int get = 0;
+					get = getCurrentSystemValue("hue");
 					hueValue-=1;
+					value = (get*5)-5;
+					Hue(0, value);
 				}
 			} else {
 				if (hueValue<COLOR_MAX_VALUE) {
+					int value = 0;
+					int get = 0;
+					get = getCurrentSystemValue("hue");
 					hueValue+=1;
+					value = (get*5)+5;
+					Hue(0, value);
 				}
 			}
 			setSystemValue("hue", hueValue);
 		} else if (chosenSetting==SATURATION_OPTION) {
 			if (keys[BTN_LEFT]) {
-				if (saturationValue>1) {
+				if (saturationValue>0) {
+					int value = 0;
+					int get = 0;
+					get = getCurrentSystemValue("saturation");
 					saturationValue-=1;
+					value = (get*5)-5;
+					Saturation(0, value);
 				}
 			} else {
 				if (saturationValue<COLOR_MAX_VALUE) {
+					int value = 0;
+					int get = 0;
+					get = getCurrentSystemValue("saturation");
 					saturationValue+=1;
+					value = (get*5)+5;
+					Saturation(0, value);
 				}
 			}
 			setSystemValue("saturation", saturationValue);
 		} else if (chosenSetting==CONTRAST_OPTION) {
 			if (keys[BTN_LEFT]) {
-				if (contrastValue>1) {
+				if (contrastValue>0) {
+					int value = 0;
+					int get = 0;
+					get = getCurrentSystemValue("contrast");
 					contrastValue-=1;
+					value = ((get*2)+30)-2;
+					Contrast(0, value);
 				}
 			} else {
 				if (contrastValue<COLOR_MAX_VALUE) {
+					int value = 0;
+					int get = 0;
+					get = getCurrentSystemValue("contrast");
 					contrastValue+=1;
+					value = ((get*2)+30)+2;
+					Contrast(0, value); 
 				}
 			}
 			setSystemValue("contrast", contrastValue);
+		} else if (chosenSetting==GAMMA_OPTION) {
+			loadConfiguration3();
+			if (keys[BTN_LEFT]) {
+				if (gammaValue>-5) {
+					gammaValue-=1;
+				}
+			} else {
+				if (gammaValue<GAMMA_MAX_VALUE) {
+					gammaValue+=1;
+				}
+			}
+			saveConfiguration3(gammaValue);
 		}
 	} else if (keys[BTN_B]) {
 		chosenSetting=SCREEN_OPTION;
@@ -869,6 +923,198 @@ void performScreenSettingsChoosingAction() {
 }
 #endif
 
+#if defined MIYOOMINI
+void performSystemSettingsChoosingAction() {
+	VOLUME_OPTION=0;
+	BRIGHTNESS_OPTION=1;
+	OC_OPTION=2;
+    AUDIOFIX_OPTION=3;
+	MUSIC_OPTION=4;
+    SCREEN_OPTION=5;
+	LOADING_OPTION=6;
+	SCREEN_TIMEOUT_OPTION=7;
+    NUM_SYSTEM_OPTIONS=8;
+	if (keys[BTN_UP]) {
+		if(chosenSetting>0) {
+			chosenSetting--;
+		} else {
+			chosenSetting=NUM_SYSTEM_OPTIONS-1;
+		}
+	} else if (keys[BTN_DOWN]) {
+		if(chosenSetting<NUM_SYSTEM_OPTIONS-1) {
+			chosenSetting++;
+		} else {
+			chosenSetting=0;
+		}
+	} else if (keys[BTN_LEFT]||keys[BTN_RIGHT]) {
+		if (chosenSetting==BRIGHTNESS_OPTION) {
+			if (keys[BTN_LEFT]) {
+				if (brightnessValue>1) {
+					brightnessValue-=1;
+				}
+			} else {
+				if (brightnessValue<maxBrightnessValue) {
+					brightnessValue+=1;
+				}
+			}
+			setSystemValue("brightness", brightnessValue);
+			setBrightness(brightnessValue);
+		} else if (chosenSetting==SCREEN_TIMEOUT_OPTION) {
+				if (keys[BTN_LEFT]) {
+					if (timeoutValue>0) {
+						timeoutValue-=5;
+					}
+				} else {
+					if (timeoutValue<60) {
+						timeoutValue+=5;
+					}
+				}
+		} else if (chosenSetting==OC_OPTION) {
+			FILE *fp = fopen("/sys/devices/system/cpu/cpu0/cpufreq/scaling_max_freq", "r");
+			fscanf(fp, "%d", &CPUMIYOO);
+			fclose(fp);
+			if (keys[BTN_LEFT]) {
+				if (CPUMIYOO>400000) {
+					CPUMIYOO-=200000;
+					char cpuclock0[100];
+					snprintf(cpuclock0, sizeof(cpuclock0), "echo %d > /sys/devices/system/cpu/cpu0/cpufreq/scaling_max_freq", CPUMIYOO);
+					system(cpuclock0);
+					system("cp /sys/devices/system/cpu/cpu0/cpufreq/scaling_governor /mnt/SDCARD/.simplemenu/governor.sav");
+					system("cp /sys/devices/system/cpu/cpu0/cpufreq/scaling_max_freq /mnt/SDCARD/.simplemenu/cpu.sav");
+					system("sync");
+				}
+			} else {
+				if (CPUMIYOO<1200000) {
+					CPUMIYOO+=200000;
+					char cpuclock0[100];
+					snprintf(cpuclock0, sizeof(cpuclock0), "echo %d > /sys/devices/system/cpu/cpu0/cpufreq/scaling_max_freq", CPUMIYOO);
+					system(cpuclock0);
+					system("cp /sys/devices/system/cpu/cpu0/cpufreq/scaling_governor /mnt/SDCARD/.simplemenu/governor.sav");
+					system("cp /sys/devices/system/cpu/cpu0/cpufreq/scaling_max_freq /mnt/SDCARD/.simplemenu/cpu.sav");
+					system("sync");
+				}
+			}
+		} else if (chosenSetting==AUDIOFIX_OPTION) {
+			getCurrentVolume();
+            audioFix = 1 - audioFix;
+            setSystemValue("audiofix", audioFix);
+		 	Fix = getCurrentSystemValue("audiofix");
+			volume = getCurrentSystemValue("vol");
+		 	if (Fix == 1) {
+	        	brightness = getCurrentBrightness();
+				if (musicEnabled) {
+					stopmusic();
+				}
+				if (mmModel) {
+					char command [100];
+					char command2 [100];
+					snprintf(command, sizeof(command), "/mnt/SDCARD/Koriki/bin/audioserver &");
+					snprintf(command2, sizeof(command2), "touch /tmp/audioserver_on && sync");
+					setenv("LD_PRELOAD", "/mnt/SDCARD/Koriki/lib/libpadsp.so", 1);
+					system(command);
+					system(command2);
+				} else {
+					char command [100];
+					char command2 [100];
+					snprintf(command, sizeof(command), "/mnt/SDCARD/Koriki/bin/audioserver &");
+					snprintf(command2, sizeof(command2), "touch /tmp/audioserver_on && sync");
+					setenv("LD_PRELOAD", "/mnt/SDCARD/Koriki/lib/libpadsp.so", 1);
+					system(command);
+					system(command2);
+				}
+				if (musicEnabled) {
+					startmusic();
+				}
+				setBrightness(brightness);
+			} else if (Fix == 0) {
+	        	brightness = getCurrentBrightness();
+				if (musicEnabled) {
+					stopmusic();
+				}
+				if (mmModel) {
+					char command [128];
+					snprintf(command, sizeof(command), "killall audioserver && killall audioserver.min && rm /tmp/audioserver_on && sync");
+					system(command);
+					unsetenv("LD_PRELOAD");
+				} else {
+					char command [128];
+					snprintf(command, sizeof(command), "killall audioserver && killall audioserver.plu && rm /tmp/audioserver_on && sync");
+					system(command);
+					unsetenv("LD_PRELOAD");
+				}
+				if (musicEnabled) {
+					startmusic();
+				}
+				setBrightness(brightness);
+			}
+			getCurrentVolume();
+			setVolume(volume, 0);
+		} else if (chosenSetting==LOADING_OPTION) {
+			loadConfiguration1();
+			if (loadingScreenEnabled == 1) {
+				loadingScreenEnabled = 0;
+			} else if (loadingScreenEnabled == 0) {
+				loadingScreenEnabled = 1;
+				}
+			saveConfiguration1();
+		} else if (chosenSetting==MUSIC_OPTION) {
+			loadConfiguration2();
+			if (musicEnabled == 1) {
+				musicEnabled = 0;
+				stopmusic();
+			} else if (musicEnabled == 0) {
+				musicEnabled = 1;
+				if (Fix == 0) {
+					brightness = getCurrentBrightness();
+					volume = getCurrentSystemValue("vol");
+				}
+				startmusic();
+				if (Fix == 0) {
+					setBrightness(brightness);
+					setVolume(volume, 0);
+				}
+			}
+			saveConfiguration2();
+		} else if (chosenSetting==VOLUME_OPTION) {
+			if (keys[BTN_LEFT]) {
+				if (volValue>0) {
+					volume = getCurrentSystemValue("vol");
+					volValue-=1;
+					setVolume(volume, -1);
+					setSystemValue("vol", volValue);
+					if (volValue == 0) {
+						setSystemValue("mute", 1);
+						setMute(1);
+					} else if (volValue > 0) {
+						setSystemValue("mute", 0);
+						setMute(0);
+					}
+				}
+			} else {
+				if (volValue<23) {
+					volume = getCurrentSystemValue("vol");
+					volValue+=1;
+					setVolume(volume, 1);
+					setSystemValue("vol", volValue);
+					if (volValue == 0) {
+						setSystemValue("mute", 1);
+						setMute(1);
+					} else if (volValue > 0) {
+						setSystemValue("mute", 0);
+						setMute(0);
+					}
+				}
+			}
+		}
+	} else if (chosenSetting==SCREEN_OPTION&&keys[BTN_A]) {
+		chosenSetting=0;
+		currentState=SCREEN_SETTINGS;
+	} else if (keys[BTN_B]) {
+		chosenSetting=previouslyChosenSetting;
+		currentState=SETTINGS_SCREEN;
+	}
+}
+#else
 void performSystemSettingsChoosingAction() {
 	VOLUME_OPTION=0;
 	BRIGHTNESS_OPTION=1;
@@ -876,13 +1122,7 @@ void performSystemSettingsChoosingAction() {
 	SCREEN_TIMEOUT_OPTION=3;
 	OC_OPTION=4;
 	USB_OPTION=5;
-#if defined MIYOOMINI
-    AUDIOFIX_OPTION = 6;
-    SCREEN_OPTION = 7;
-    NUM_SYSTEM_OPTIONS = 8;
-#else
     NUM_SYSTEM_OPTIONS = 6;
-#endif
 	if (keys[BTN_UP]) {
 		if(chosenSetting>0) {
 			chosenSetting--;
@@ -944,71 +1184,15 @@ void performSystemSettingsChoosingAction() {
 			} else {
 				OCValue=OC_OC_LOW;
 			}
-#else
-#if defined MIYOOMINI
-			FILE *fp = fopen("/sys/devices/system/cpu/cpu0/cpufreq/scaling_max_freq", "r");
-			int CPUMIYOO;
-			fscanf(fp, "%d", &CPUMIYOO);
-			fclose(fp);
-			if (keys[BTN_LEFT]) {
-				if (CPUMIYOO>400000) {
-					CPUMIYOO-=200000;
-					char cpuclock[200];
-					snprintf(cpuclock, sizeof(cpuclock), "echo %d > /sys/devices/system/cpu/cpu0/cpufreq/scaling_max_freq", CPUMIYOO);
-					system(cpuclock);
-				}
-			} else {
-				if (CPUMIYOO<1200000) {
-					CPUMIYOO+=200000;
-					char cpuclock[200];
-					snprintf(cpuclock, sizeof(cpuclock), "echo %d > /sys/devices/system/cpu/cpu0/cpufreq/scaling_max_freq", CPUMIYOO);
-					system(cpuclock);
-				}
-			}
-#else
-			OCValue=OC_NO;
-#endif
-#endif
-        }
-#if defined MIYOOMINI
-	 else if (chosenSetting==AUDIOFIX_OPTION) {
-		 	int Fix;
-            audioFix = 1 - audioFix;
-            setSystemValue("audiofix", audioFix);
-		 	Fix = audioFix;
-		 	if (Fix == 1) {
-				system ("LD_PRELOAD=/customer/lib/libpadsp.so /mnt/SDCARD/Koriki/bin/audioserver &");
-			} else if (Fix == 0) {
-				if (mmModel)
-					system ("killall audioserver && killall audioserver.min");
-				else
-					system ("killall audioserver && killall audioserver.plu");
-			}
-		} else if (chosenSetting==VOLUME_OPTION) {
-			if (keys[BTN_LEFT]) {
-				if (volValue>0) {
-					int volume;
-					volume = getCurrentSystemValue("vol");
-					volValue-=1;
-					setVolume(volume, -1);
-					setSystemValue("vol", volValue);
-				}
-			} else {
-				if (volValue<20) {
-					int volume;
-					volume = getCurrentSystemValue("vol");
-					volValue+=1;
-					setVolume(volume, 1);
-					setSystemValue("vol", volValue);
-				}
-			}
 		}
 #else
-	 else if (chosenSetting==VOLUME_OPTION&&keys[BTN_A]) {
+			OCValue=OC_NO;
+		}
+#endif
+	} else if (chosenSetting==VOLUME_OPTION&&keys[BTN_A]) {
 		if (keys[BTN_A]) {
 			executeCommand ("/usr/bin", "alsamixer", "#", 1, OC_NO);
 		}
-#endif
 	} else if (chosenSetting==USB_OPTION&&keys[BTN_A]) {
 #if defined TARGET_RFW
 		executeCommand ("./scripts/", "usb_mode_on.sh", "#", 0, OC_NO);
@@ -1017,37 +1201,78 @@ void performSystemSettingsChoosingAction() {
 		selectedShutDownOption=1;
 		running=0;
 #endif
-#if defined MIYOOMINI
-	} else if (chosenSetting==SCREEN_OPTION&&keys[BTN_A]) {
-		chosenSetting=0;
-		currentState=SCREEN_SETTINGS;
-#endif
 	} else if (keys[BTN_B]) {
 		chosenSetting=previouslyChosenSetting;
 		currentState=SETTINGS_SCREEN;
 	}
 }
-
+#endif
+	
 void performSettingsChoosingAction() {
+	#if defined MIYOOMINI
+	if (mmModel) {
+	SHUTDOWN_OPTION=0;
+	THEME_OPTION=1;
+	APPEARANCE_OPTION=2;
+	SYSTEM_OPTION=3;
+	RETROARCH_OPTION=4;
+	HELP_OPTION=5;
+	} else {
+	SHUTDOWN_OPTION=0;
+	THEME_OPTION=1;
+	APPEARANCE_OPTION=2;
+	SYSTEM_OPTION=3;
+	WIFI_OPTION=4;
+	WIFIAPP_OPTION=5;
+	SCRAPER_OPTION=6;
+	RETROARCH_OPTION=7;
+	HELP_OPTION=8;
+	}
+	#else
 	SHUTDOWN_OPTION=0;
 	THEME_OPTION=1;
 	DEFAULT_OPTION=2;
 	APPEARANCE_OPTION=3;
 	SYSTEM_OPTION=4;
 	HELP_OPTION=5;
+	#endif
 
 	if (keys[BTN_UP]) {
 		if(chosenSetting>0) {
 			chosenSetting--;
 		} else {
+			#if defined MIYOOMINI
+			if (mmModel) {
 			chosenSetting=5;
+			} else {
+			chosenSetting=8;
+			}
+			#else
+			chosenSetting=5;
+			#endif
 		}
 	} else if (keys[BTN_DOWN]) {
+		#if defined MIYOOMINI
+		if (mmModel) {
+			if(chosenSetting<5) {
+	        	chosenSetting++;
+			} else {
+				chosenSetting=0;
+			}
+		} else {
+			if(chosenSetting<8) {
+	        	chosenSetting++;
+			} else {
+				chosenSetting=0;
+			}
+		}
+		#else
 		if(chosenSetting<5) {
 			chosenSetting++;
 		} else {
 			chosenSetting=0;
 		}
+		#endif
 	} else if (keys[BTN_LEFT]||keys[BTN_RIGHT]) {
 		if (chosenSetting==SHUTDOWN_OPTION) {
 			if (shutDownEnabled) {
@@ -1090,6 +1315,19 @@ void performSettingsChoosingAction() {
 					activeTheme=0;
 				}
 			}
+		} else if (chosenSetting==WIFI_OPTION) {
+			#if defined MIYOOMINI
+			if (!mmModel) {
+			loadConfiguration4();
+			if (wifiEnabled == 1) {
+				wifiEnabled = 0;
+			} else if (wifiEnabled == 0) {
+				wifiEnabled = 1;
+			}
+			saveConfiguration4();
+			}
+			#else
+			#endif
 		} else if (chosenSetting==DEFAULT_OPTION) {
 			#ifndef MIYOOMINI
 			char command [300];
@@ -1145,6 +1383,29 @@ void performSettingsChoosingAction() {
 		chosenSetting=0;
 		currentState=SYSTEM_SETTINGS;
 		brightnessValue = getCurrentBrightness();
+		volValue = getCurrentSystemValue("vol");
+	} else if (chosenSetting==RETROARCH_OPTION&&keys[BTN_A]) {
+		#if defined MIYOOMINI
+		chosenSetting=0;
+		executeCommand("/mnt/SDCARD/.simplemenu/hide", "RetroArch.sh", "#", 0);
+		#else
+		#endif
+	} else if (chosenSetting==WIFIAPP_OPTION&&keys[BTN_A]) {
+		#if defined MIYOOMINI
+		if (!mmModel) {
+		chosenSetting=0;
+		executeCommand("/mnt/SDCARD/.simplemenu/hide", "Wifi.sh", "#", 0);
+		}
+		#else
+		#endif
+	} else if (chosenSetting==SCRAPER_OPTION&&keys[BTN_A]) {
+		#if defined MIYOOMINI
+		if (!mmModel) {
+		chosenSetting=0;
+		executeCommand("/mnt/SDCARD/.simplemenu/hide", "Scraper.sh", "#", 0);
+		}
+		#else
+		#endif
 	} else if (keys[BTN_B]) {
 		#if defined TARGET_OD
 		if (hdmiChanged!=hdmiEnabled) {
@@ -1202,8 +1463,6 @@ void performSettingsChoosingAction() {
 	}
 }
 
-
-
 void performChoosingAction() {
 	struct Rom *rom = CURRENT_SECTION.currentGameNode->data;
 	if (keys[BTN_UP]) {
@@ -1218,20 +1477,12 @@ void performChoosingAction() {
 		}
 	} else if (keys[BTN_LEFT]) {
 		if(chosenChoosingOption==0) {
-#if defined MIYOOMINI
-			if (rom->preferences.frequency==OC_NO) {
-				rom->preferences.frequency=CPUMIYOOValue;
-			} else {
-				rom->preferences.frequency=OC_NO;
-			}
-#else
 #if defined TARGET_OD_BETA || defined TARGET_RFW || defined TARGET_BITTBOY || defined TARGET_PC
 			if (rom->preferences.frequency==OC_NO) {
 				rom->preferences.frequency=OCValue;
 			} else {
 				rom->preferences.frequency=OC_NO;
 			}
-#endif
 #endif
 		} else if (chosenChoosingOption == 1){
 			launchAtBoot = 1+-1*launchAtBoot;
@@ -1255,20 +1506,12 @@ void performChoosingAction() {
 		}
 	} else 	if (keys[BTN_RIGHT]) {
 		if(chosenChoosingOption==0) {
-#if defined MIYOOMINI
-			if (rom->preferences.frequency==OC_NO) {
-				rom->preferences.frequency=CPUMIYOOValue;
-			} else {
-				rom->preferences.frequency=OC_NO;
-			}
-#else
 #if defined TARGET_OD_BETA || defined TARGET_RFW || defined TARGET_BITTBOY || defined TARGET_PC
 			if (rom->preferences.frequency==OC_NO) {
 				rom->preferences.frequency=OCValue;
 			} else {
 				rom->preferences.frequency=OC_NO;
 			}
-#endif
 #endif
 		}
 		else if (chosenChoosingOption == 1){
@@ -1288,6 +1531,23 @@ void performChoosingAction() {
 			}
 		}
 	} else	if (keys[BTN_B]) {
+		#if defined MIYOOMINI
+		if (currentState!=BROWSING_GAME_LIST) {
+			int emu = CURRENT_SECTION.currentGameNode->data->preferences.emulator;
+			int emuDir = CURRENT_SECTION.currentGameNode->data->preferences.emulatorDir;
+			loadRomPreferences(CURRENT_SECTION.currentGameNode->data);
+			if (CURRENT_SECTION.currentGameNode->data->preferences.emulatorDir!=emuDir  || CURRENT_SECTION.currentGameNode->data->preferences.emulator!=emu) {
+				CURRENT_SECTION.currentGameNode->data->preferences.emulator=emu;
+				CURRENT_SECTION.currentGameNode->data->preferences.emulatorDir=emu;
+				saveRomPreferences(CURRENT_SECTION.currentGameNode->data);
+			}
+			if (getLaunchAtBoot()!=NULL) {
+				launchGame(CURRENT_SECTION.currentGameNode->data);
+			}
+			previousState=SELECTING_EMULATOR;
+			currentState=BROWSING_GAME_LIST;
+		}
+		#else
 		if (currentState!=BROWSING_GAME_LIST) {
 			int emu = CURRENT_SECTION.currentGameNode->data->preferences.emulator;
 			int emuDir = CURRENT_SECTION.currentGameNode->data->preferences.emulatorDir;
@@ -1305,6 +1565,7 @@ void performChoosingAction() {
 			previousState=SELECTING_EMULATOR;
 			currentState=BROWSING_GAME_LIST;
 		}
+		#endif
 	}
 }
 
