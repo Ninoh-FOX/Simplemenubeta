@@ -65,6 +65,11 @@ int romIndex;
 const char *displayName;
 } SearchResult;
 
+typedef struct {
+        const char *name;
+        const char *abbreviation;
+} SystemAbbreviation;
+
 static int ensureSectionInitialized(int sectionIndex);
 
 typedef struct {
@@ -97,6 +102,7 @@ static char searchIndexPath[PATH_MAX];
 static int searchSectionGameCountCache[100];
 static int searchSectionCountCacheSize=0;
 static void drawBoxWithBorder(int x, int y, int width, int height, int *fillColor, int *borderColor, int thickness);
+static const char *getSectionAbbreviation(const char *sectionName, const char *fantasyName);
 static const char *searchKeyboardRows[] = {
         "ABCDEFGHIJKL",
         "MNOPQRSTUVWX",
@@ -2181,6 +2187,112 @@ static int ensureSectionInitialized(int sectionIndex) {
         return menuSections[sectionIndex].initialized;
 }
 
+static const char *getSectionAbbreviation(const char *sectionName, const char *fantasyName) {
+        static const SystemAbbreviation abbreviations[] = {
+			{"AMIGA", "AMI"},
+			{"AMSTRAD CPC", "CPC"},
+			{"ARDUINO", "ARD"},
+			{"ATARI 2600", "A26"},
+			{"ATARI 5200", "A52"},
+			{"ATARI 7800", "A78"},
+			{"ATARI LYNX", "LYX"},
+			{"ATARI ST", "AST"},
+			{"COMMODORE 64", "C64"},
+			{"CPS1", "CPS1"},
+			{"CPS12", "CPS2"},
+			{"CPS3", "CPS3"},
+			{"DAPHNE", "DPN"},
+			{"DOOM", "DOM"},
+			{"DOS", "DOS"},
+			{"FDS", "FDS"},
+			{"FINALBURN NEO", "FBN"},
+			{"FINALBURN ALPHA", "FBA"},
+			{"GAME & WATCH", "G&W"},
+			{"GAME BOY", "GB"},
+			{"GAME BOY COLOR", "GBC"},
+			{"GAME BOY ADVANCE", "GBA"},
+			{"GAME GEAR", "GG"},
+			{"GAMES", "PORT"},
+			{"INTELLIVISION", "INT"},
+			{"MAME", "MAM"},
+			{"MASTER SYSTEM", "SMS"},
+			{"MSU-1", "MSU1"},
+			{"MSU-MD", "MSUM"},
+			{"MSX", "MSX"},
+			{"NES", "NES"},
+			{"FC", "NES"},
+			{"NEO GEO", "NEO"},
+			{"NEO GEO CD", "NCD"},
+			{"NEO GEO POCKET", "NGP"},
+			{"NINTENDO DS", "NDS"},
+			{"ODYSSEY2", "ODY"},
+			{"OPENBOR", "BOR"},
+			{"OVERLAYS", "OVER"},
+			{"PC98", "PC98"},
+			{"PC ENGINE", "PCE"},
+			{"PC ENGINE CD", "PCEC"},
+			{"PICO-8", "P8"},
+			{"PLAYSTATION", "PSX"},
+			{"PSX", "PSX"},
+			{"POKEMON MINI", "MINI"},
+			{"QUAKE", "QKE"},
+			{"SCUMMVM", "SCM"},
+			{"SGB", "SGB"},
+			{"SEGA 32X", "32X"},
+			{"SEGA CD", "SCD"},
+			{"SEGA GENESIS", "SMD"},
+			{"SEGA SG-1000", "SG10"},
+			{"SNES", "SNES"},
+			{"SUPERVISION", "SVIS"},
+			{"TIC-80", "TIC"},
+			{"VIRTUAL BOY", "VBOY"},
+			{"WOLF3D", "W3D"},
+			{"WONDERSWAN", "WS"},
+			{"ZX SPECTRUM", "ZXS"},
+			{"X68000", "X68"}
+        };
+
+        const char *name = (fantasyName != NULL && strlen(fantasyName) > 0) ? fantasyName : sectionName;
+        if (name == NULL) {
+                return "?";
+        }
+
+        size_t bestMatchLength = 0;
+        const char *bestAbbreviation = NULL;
+
+        for (size_t i = 0; i < sizeof(abbreviations) / sizeof(abbreviations[0]); i++) {
+                if (strcasecmp(name, abbreviations[i].name) == 0) {
+                        return abbreviations[i].abbreviation;
+                }
+
+                const char *found = strcasestr(name, abbreviations[i].name);
+                if (found != NULL) {
+                        size_t matchLength = strlen(abbreviations[i].name);
+                        if (matchLength > bestMatchLength) {
+                                bestMatchLength = matchLength;
+                                bestAbbreviation = abbreviations[i].abbreviation;
+                        }
+                }
+        }
+
+        if (bestAbbreviation != NULL) {
+                return bestAbbreviation;
+        }
+
+        static char fallback[5];
+        int index = 0;
+        for (const char *c = name; *c != '\0' && index < 3; c++) {
+                if (isalnum((unsigned char)*c)) {
+                        fallback[index++] = (char)toupper((unsigned char)*c);
+                }
+        }
+        fallback[index] = '\0';
+        if (index == 0) {
+                strcpy(fallback, "?");
+        }
+        return fallback;
+}
+
 static void ellipsizeTextForWidth(TTF_Font *fontToUse, const char *text, int maxWidth, char *out, size_t outSize) {
         if (outSize == 0) {
                 return;
@@ -2529,11 +2641,24 @@ static void drawSearchResults(int startX, int startY, int listWidth, int listHei
                 int rowCenterY = yTop + (rowHeight / 2);
                 int bulletX = startX + leftPadding;
                 int textX = startX + bulletWidth + calculateProportionalSizeOrDistance1(2) + leftPadding;
+                const char *sectionName = menuSections[result.sectionIndex].sectionName;
+                const char *fantasyName = menuSections[result.sectionIndex].fantasyName;
+                const char *abbreviation = getSectionAbbreviation(sectionName, fantasyName);
+                char systemLabel[16];
+                snprintf(systemLabel, sizeof(systemLabel), "[%s]", abbreviation);
+                int systemLabelWidth = 0;
+                getTextWidth(searchFont, systemLabel, &systemLabelWidth);
+                int labelX = startX + rowWidth - rightPadding;
+                int labelGap = calculateProportionalSizeOrDistance1(6);
                 drawTextOnScreen(searchFont, NULL, bulletX, rowCenterY, "■", bulletColor, VAlignMiddle | HAlignLeft, (int[]){}, 0);
-                int availableWidth = rowWidth - (textX - startX) - rightPadding;
+                int availableWidth = rowWidth - (textX - startX) - rightPadding - systemLabelWidth - labelGap;
+                if (availableWidth < 0) {
+                        availableWidth = 0;
+                }
                 char trimmedName[600];
                 ellipsizeTextForWidth(searchFont, displayName, availableWidth, trimmedName, sizeof(trimmedName));
                 drawHighlightedText(searchFont, textX, rowCenterY, trimmedName, searchQuery, textColor, highlightColor);
+                drawTextOnScreen(searchFont, NULL, labelX, rowCenterY, systemLabel, textColor, VAlignMiddle | HAlignRight, (int[]){}, 0);
         }
 
         if (searchResultsCount == 0) {
