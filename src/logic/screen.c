@@ -2748,12 +2748,17 @@ static void drawSearchOverlay() {
         }
 
         if (searchRecentMode) {
+                int titleHeight = textHeight + calculateProportionalSizeOrDistance1(4);
+                int titleY = panelY + calculateProportionalSizeOrDistance1(12);
+                drawTextOnScreen(searchFont, NULL, panelX + panelWidth / 2, titleY, "GAME HISTORY TIME", labelColor, VAlignMiddle | HAlignCenter, (int[]){}, 0);
+
                 int listX = panelX + calculateProportionalSizeOrDistance1(2);
-                int listY = panelY + calculateProportionalSizeOrDistance1(2);
+                int listY = titleY + titleHeight / 2 + calculateProportionalSizeOrDistance1(4);
                 int listWidth = panelWidth - calculateProportionalSizeOrDistance1(4);
-                int listHeight = panelHeight - calculateProportionalSizeOrDistance1(4);
+                int listHeight = panelY + panelHeight - calculateProportionalSizeOrDistance1(2) - listY;
                 int rowHeight = textHeight + calculateProportionalSizeOrDistance1(2);
                 int maxVisible = rowHeight > 0 ? listHeight / rowHeight : 1;
+                maxVisible--;
                 if (maxVisible < 1) maxVisible = 1;
                 drawBoxWithBorder(listX, listY, listWidth, listHeight, (int[]){20, 18, 18}, frameColor, 1);
                 drawSearchResults(listX, listY + calculateProportionalSizeOrDistance1(2), listWidth, listHeight - calculateProportionalSizeOrDistance1(4), maxVisible, rowHeight);
@@ -3057,7 +3062,6 @@ void handleSearchInput(int key) {
 		else if (key == BTN_LEFT) { for (int i = 0; i < 10; i++) moveSelectionUp(); }
 		else if (key == BTN_RIGHT) { for (int i = 0; i < 10; i++) moveSelectionDown(); }
 		else if (key == BTN_A || key == BTN_START) { /* recent mode: no launch */ }
-		else if (key == BTN_B) closeSearchWindow();
 		refreshRequest = 1;
 		return;
 	}
