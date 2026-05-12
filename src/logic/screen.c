@@ -547,17 +547,18 @@ void initializeSettingsFonts() {
 void initializeFonts() {
 	TTF_Init();
 	char *akashi = "resources/akashi.ttf";
+	char *custom_search = "resources/search.ttf";
 
 	font = TTF_OpenFont(menuFont, fontSize);
 	outlineFont = TTF_OpenFont(menuFont, fontSize);
 
-        int searchFontSize = artTextFontSize - calculateProportionalSizeOrDistance1(5);
+        int searchFontSize = 32 - calculateProportionalSizeOrDistance1(5);
         if (searchFontSize < calculateProportionalSizeOrDistance1(7)) {
                 searchFontSize = calculateProportionalSizeOrDistance1(7);
         }
         miniFont = TTF_OpenFont(menuFont, artTextFontSize);
         outlineMiniFont = TTF_OpenFont(menuFont, artTextFontSize);
-        searchFont = TTF_OpenFont(menuFont, searchFontSize);
+        searchFont = TTF_OpenFont(custom_search, searchFontSize);;
 
 	picModeFont = TTF_OpenFont(menuFont, fontSize+calculateProportionalSizeOrDistance1(5));
 	BIGFont = TTF_OpenFont(akashi, calculateProportionalSizeOrDistance1(16)+calculateProportionalSizeOrDistance1(17));
@@ -579,7 +580,7 @@ void initializeFonts() {
                 TTF_SetFontOutline(outlineFooterFont,fontOutline);
                 TTF_SetFontOutline(outlineCustomHeaderFont,fontOutline);
                 TTF_SetFontOutline(outlineCustomCountFont,fontOutline);
-                TTF_SetFontOutline(searchFont,fontOutline);
+                TTF_SetFontOutline(searchFont,0);
         }
 
 	sectionCardsGameCountFont = TTF_OpenFont(gameCountFont, gameCountFontSize);
@@ -1747,6 +1748,28 @@ void setupSystemSettings() {
 		sprintf(values[7],"%s","always on");
 	}
 	hints[7] = "SECONDS UNTIL THE SCREEN TURNS OFF";
+	
+	options[8] = "Power option ";
+	if (tapeValue==0) {
+		values[8] = "Pause (Not-OFF)";
+		hints[8] = "PAUSE THE MIYOOMINI (SLEEP MODE)";
+	} else if (tapeValue==1){
+		values[8] = "Pause (Not-Lid)";
+		hints[8] = "PAUSE MM AND DISABLE THE LID SENSOR";
+	} else if (tapeValue==2){
+		values[8] = "AutoOFF (save)";
+		hints[8] = "IN 10MIN AND AUTOLOAD THE LAST GAME";
+	} else if (tapeValue==3){
+		values[8] = "AutoOFF (Save/Not-Lid)";
+		hints[8] = "IN 10MIN AND AUTOLOAD THE LAST GAME";
+	} else if (tapeValue==4){
+		values[8] = "AutoOFF (Not-Save)";
+		hints[8] = "IN 10MIN AND NOT SAVE THE LAST GAME";
+	} else if (tapeValue==5){
+		values[8] = "AutoOFF (Not-Save/Not-Lid)";
+		hints[8] = "IN 10MIN AND NOT SAVE THE LAST GAME";
+	}
+	
 #endif
 }
 
