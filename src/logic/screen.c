@@ -108,11 +108,13 @@ static int searchRecentMode=0;
 typedef struct {
         char *displayName;
         char runtime[32];
+        int runtimeSeconds;
         time_t lastPlayed;
 } RecentLogEntry;
 
 static RecentLogEntry recentEntries[1024];
 static int recentEntriesCount=0;
+static int recentMedalRank[1024];
 static void drawBoxWithBorder(int x, int y, int width, int height, int *fillColor, int *borderColor, int thickness);
 static const char *getSectionAbbreviation(const char *sectionName, const char *fantasyName);
 static const char *searchKeyboardRows[] = {
@@ -2684,6 +2686,9 @@ static void drawSearchResults(int startX, int startY, int listWidth, int listHei
                 int rowCenterY = yTop + (rowHeight / 2);
                 int bulletX = startX + leftPadding;
                 int textX = startX + bulletWidth + calculateProportionalSizeOrDistance1(2) + leftPadding;
+                if (searchRecentMode) {
+                        textX = startX + calculateProportionalSizeOrDistance1(20);
+                }
                 char systemLabel[32];
                 if (searchRecentMode) {
                         snprintf(systemLabel, sizeof(systemLabel), "%s", recentEntries[result.romIndex].runtime);
@@ -2697,8 +2702,13 @@ static void drawSearchResults(int startX, int startY, int listWidth, int listHei
                 getTextWidth(searchFont, systemLabel, &systemLabelWidth);
                 int labelX = startX + rowWidth - rightPadding;
                 int labelGap = calculateProportionalSizeOrDistance1(6);
-                drawTextOnScreen(searchFont, NULL, bulletX, rowCenterY, "■", bulletColor, VAlignMiddle | HAlignLeft, (int[]){}, 0);
-                int availableWidth = rowWidth - (textX - startX) - rightPadding - systemLabelWidth - labelGap;
+                if (searchRecentMode && i < 3) {
+						char medalLabel[] = "★";
+                        int *medalColor = i == 0 ? (int[]){255, 215, 0} : (i == 1 ? (int[]){192, 192, 192} : (int[]){205, 127, 50});
+						drawTextOnScreen(searchFont, NULL, bulletX, rowCenterY, medalLabel, medalColor, VAlignMiddle | HAlignLeft, (int[]){}, 0);
+                } else {
+                        drawTextOnScreen(searchFont, NULL, bulletX, rowCenterY, "■", bulletColor, VAlignMiddle | HAlignLeft, (int[]){}, 0);
+                }                int availableWidth = rowWidth - (textX - startX) - rightPadding - systemLabelWidth - labelGap;
                 if (availableWidth < 0) {
                         availableWidth = 0;
                 }
@@ -2932,6 +2942,15 @@ static void clearRecentEntries() {
         recentEntriesCount = 0;
 }
 
+static int parseRuntimeToSeconds(const char *runtime) {
+        int h = 0, m = 0, sec = 0;
+        if (sscanf(runtime, "%d:%d:%d", &h, &m, &sec) != 3) {
+                return 0;
+        }
+        if (h < 0 || m < 0 || sec < 0) return 0;
+        return h * 3600 + m * 60 + sec;
+}
+
 static int parseRetroarchDate(const char *value, time_t *outTime) {
         struct tm tmValue;
         memset(&tmValue, 0, sizeof(tmValue));
@@ -2987,7 +3006,8 @@ static void scanRecentLogsRecursive(const char *dirPath) {
                 slot->displayName[len] = '\0';
                 strncpy(slot->runtime, runtime->valuestring, sizeof(slot->runtime)-1);
                 slot->runtime[sizeof(slot->runtime)-1] = '\0';
-                slot->lastPlayed = lp;
+                slot->runtimeSeconds = parseRuntimeToSeconds(slot->runtime);
+				slot->lastPlayed = lp;
                 cJSON_Delete(root);
         }
         closedir(dir);
@@ -3018,17 +3038,44 @@ void openRecentWindow() {
 	resetSearchState();
 	clearRecentEntries();
 	searchRecentMode = 1;
+	for (int i = 0; i < (int)(sizeof(recentMedalRank)/sizeof(recentMedalRank[0])); i++) recentMedalRank[i] = -1;
 	scanRecentLogsRecursive("/mnt/SDCARD/RetroArch/.retroarch/logs");
 	if (recentEntriesCount > 1) {
 		qsort(recentEntries, recentEntriesCount, sizeof(RecentLogEntry), compareRecentEntries);
 	}
-	for (int i = 0; i < recentEntriesCount && i < (int)(sizeof(searchResults)/sizeof(searchResults[0])); i++) {
-		searchResults[i].displayName = recentEntries[i].displayName;
-		searchResults[i].sectionIndex = -1;
-		searchResults[i].romIndex = i;
+	int topIndex[3] = {-1, -1, -1};
+	int topSeconds[3] = {-1, -1, -1};
+	for (int i = 0; i < recentEntriesCount; i++) {
+		int seconds = recentEntries[i].runtimeSeconds;
+		for (int rank = 0; rank < 3; rank++) {
+			if (seconds > topSeconds[rank]) {
+				for (int shift = 2; shift > rank; shift--) {
+					topSeconds[shift] = topSeconds[shift - 1];
+					topIndex[shift] = topIndex[shift - 1];
+				}
+				topSeconds[rank] = seconds;
+				topIndex[rank] = i;
+				break;
+			}
+		}
 	}
-	searchResultsCount = recentEntriesCount;
-	searchTotalMatches = recentEntriesCount;
+	int row = 0;
+	for (int rank = 0; rank < 3 && row < (int)(sizeof(searchResults)/sizeof(searchResults[0])); rank++) {
+		if (topIndex[rank] >= 0 && topIndex[rank] < recentEntriesCount) {
+			searchResults[row].displayName = recentEntries[topIndex[rank]].displayName;
+			searchResults[row].sectionIndex = -1;
+			searchResults[row].romIndex = topIndex[rank];
+			row++;
+		}
+	}
+	for (int i = 0; i < recentEntriesCount && row < (int)(sizeof(searchResults)/sizeof(searchResults[0])); i++) {
+		searchResults[row].displayName = recentEntries[i].displayName;
+		searchResults[row].sectionIndex = -1;
+		searchResults[row].romIndex = i;
+		row++;
+	}
+	searchResultsCount = row;
+	searchTotalMatches = row;
 	searchFocusOnResults = 1;
 	currentState = SEARCHING_HISTORY;
 	refreshRequest = 1;
